@@ -554,9 +554,3 @@ Do not include phrases like "Thank you for the feedback" or other meta-commentar
         self._setstate(new_state)
 
         return assistant_response
-        self.append_to_chat_history(messages)
-
-        new_state = await self._thread.serialize()
-        self._setstate(new_state)
-
-        return assistant_response
