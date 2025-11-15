@@ -8,9 +8,14 @@ This guide walks through deploying the OpenAI Workshop application to Azure usin
 2. [Prerequisites](#prerequisites)
 3. [Quick Start](#quick-start)
 4. [Detailed Steps](#detailed-steps)
-5. [Post-Deployment Configuration](#post-deployment-configuration)
-6. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
-7. [CI/CD Pipeline Setup](#cicd-pipeline-setup)
+5. [Entra ID Authentication Setup](#entra-id-authentication-setup)
+6. [Post-Deployment Configuration](#post-deployment-configuration)
+7. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
+8. [CI/CD Pipeline Setup](#cicd-pipeline-setup)
+9. [Cleanup](#cleanup)
+10. [Cost Management](#cost-management)
+11. [Additional Resources](#additional-resources)
+12. [Support](#support)
 
 ## Architecture Overview
 
@@ -121,8 +126,6 @@ azd auth login
 azd up
 ```
 
-See [AZD_DEPLOYMENT.md](./AZD_DEPLOYMENT.md) for complete azd documentation.
-
 **Option B: Using PowerShell Script**
 
 ```powershell
@@ -210,8 +213,6 @@ azd deploy app
 - Built-in environment management
 - Automatic state tracking
 - Easy CI/CD integration
-
-See [AZD_DEPLOYMENT.md](./AZD_DEPLOYMENT.md) for complete azd documentation.
 
 #### Option B: PowerShell Script
 
@@ -302,6 +303,92 @@ az containerapp show `
   --resource-group openai-workshop-dev-rg `
   --query "properties.runningStatus"
 ```
+
+## Entra ID Authentication Setup
+
+Authentication is handled by `infra/scripts/setup-aad.ps1`. The script is wired into the `azd` pre/post provision hooks, but you can also run it manually to (re)generate Entra ID applications. It produces two app registrations:
+
+- **API app** exposing the `user_impersonation` scope and issuing v2 tokens via the identifier URI `api://<api-app-id>`.
+- **Frontend SPA** configured with localhost and Container App redirect URIs and permission to call the API app.
+
+### 1. Check prerequisites
+
+- Confirm you have Entra ID Application Administrator rights in the tenant.
+- Run `azd env list` and note the active environment (e.g., `agenticaiworkshop`).
+- Ensure `az login` targets the same tenant/subscription that will host the deployment.
+
+### 2. Run the provisioning script (if needed)
+
+`azd up`, `azd provision`, and `azd deploy` run the script automatically. To run it yourself:
+
+```powershell
+pwsh ./infra/scripts/setup-aad.ps1
+```
+
+The script sets/updates these environment values:
+
+| Key | Description |
+| --- | --- |
+| `AAD_API_APP_ID` | API application (audience) App ID |
+| `AAD_FRONTEND_CLIENT_ID` | SPA client ID used by MSAL in the frontend |
+| `AAD_API_AUDIENCE` | Identifier URI (`api://<api-app-id>`) consumed by the backend |
+| `AAD_API_SCOPE` | Fully qualified scope (`api://.../user_impersonation`) |
+| `AAD_ALLOWED_DOMAIN` | Email domain allowed to sign in (defaults to `microsoft.com`) |
+| `DISABLE_AUTH` | `false` once auth is enabled |
+
+Retrieve them any time with:
+
+```powershell
+azd env get-value AAD_API_APP_ID
+azd env get-value AAD_FRONTEND_CLIENT_ID
+azd env get-value AAD_API_AUDIENCE
+```
+
+### 3. Grant SPA permissions
+
+Add the delegated permission and grant consent so all users in the tenant can sign in:
+
+```powershell
+$frontend = azd env get-value AAD_FRONTEND_CLIENT_ID
+$api = azd env get-value AAD_API_APP_ID
+az ad app permission grant --id $frontend --api $api --scope user_impersonation
+az ad app permission admin-consent --id $frontend
+```
+
+### 4. Customize domains and feature flags
+
+```powershell
+# Allow a different corporate domain
+azd env set AAD_ALLOWED_DOMAIN contoso.com
+
+# Temporarily bypass auth if required for debugging
+azd env set DISABLE_AUTH true
+```
+
+Re-run the setup script after changing these values so redirect URIs and scopes stay aligned.
+
+### 5. Redeploy the application container
+
+Deploying the `app` service refreshes the Container App environment variables:
+
+```powershell
+azd deploy app
+```
+
+### 6. Validate the flow
+
+1. Launch the Container App URL produced by `azd up`.
+2. Sign in via Entra ID and wait for the agent list to load.
+3. Tail logs if you see errors:
+
+```powershell
+az containerapp logs show \
+  --name <app-service-name> \
+  --resource-group <rg-name> \
+  --follow
+```
+
+Successful requests return `200 OK`. If you still see `JWT validation failed: Audience doesn't match`, rerun the script and redeploy to ensure the backend picked up the latest `AAD_API_AUDIENCE`.
 
 ## Post-Deployment Configuration
 

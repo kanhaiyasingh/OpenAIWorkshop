@@ -7,20 +7,26 @@ Only two lines changed compared with your original file:
 Everything else is untouched.  
 """  
   
+import json
 import os  
 import sys  
+import time
+import logging
 from pathlib import Path  
 from typing import Dict, List, Any, Optional, Set, DefaultDict
 from collections import defaultdict
   
+import httpx
+import jwt
+from jwt.algorithms import RSAAlgorithm
 import uvicorn  
-from fastapi import FastAPI  
+from fastapi import FastAPI, Depends, Header, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel  
 from dotenv import load_dotenv  
-from fastapi import FastAPI, Depends, Header, WebSocket, WebSocketDisconnect
 
 # ------------------------------------------------------------------  
 # Environment  
@@ -33,12 +39,12 @@ DISABLE_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes"
 if DISABLE_AUTH:
     AAD_TENANT_ID = None
     EXPECTED_AUDIENCE = None
+    EXPECTED_AUDIENCES: list[str] = []
 else:
     # Azure AD / Entra tenant and expected audience for tokens hitting this backend
     AAD_TENANT_ID = os.getenv("AAD_TENANT_ID") or os.getenv("TENANT_ID")
     if not AAD_TENANT_ID:
         raise RuntimeError("AAD_TENANT_ID (or TENANT_ID) must be set unless DISABLE_AUTH is true.")
-    # Audience should be the App ID URI of the MCP API you're protecting via APIM, e.g., "api://<mcp-api-app-id>"
     EXPECTED_AUDIENCE = (
         os.getenv("MCP_API_AUDIENCE")
         or os.getenv("API_AUDIENCE")
@@ -47,28 +53,134 @@ else:
     if not EXPECTED_AUDIENCE:
         raise RuntimeError("Set MCP_API_AUDIENCE (e.g., api://<mcp-api-app-id>) for JWT validation or set DISABLE_AUTH=true.")
 
+    EXPECTED_AUDIENCES = [EXPECTED_AUDIENCE]
+    if EXPECTED_AUDIENCE.startswith("api://"):
+        trimmed = EXPECTED_AUDIENCE[len("api://"):]
+        if trimmed and trimmed not in EXPECTED_AUDIENCES:
+            EXPECTED_AUDIENCES.append(trimmed)
+    for fallback_env in ("MCP_API_CLIENT_ID", "AAD_API_APP_ID", "API_CLIENT_ID"):
+        fallback_value = os.getenv(fallback_env)
+        if fallback_value and fallback_value not in EXPECTED_AUDIENCES:
+            EXPECTED_AUDIENCES.append(fallback_value)
+
+ALLOWED_EMAIL_DOMAIN = (os.getenv("ALLOWED_EMAIL_DOMAIN") or "").strip()
+ALLOWED_EMAIL_DOMAIN_LOWER = ALLOWED_EMAIL_DOMAIN.lower() if ALLOWED_EMAIL_DOMAIN else ""
+FRONTEND_CLIENT_ID = os.getenv("CLIENT_ID") or os.getenv("AAD_CLIENT_ID")
+AAD_API_SCOPE = os.getenv("AAD_API_SCOPE") or os.getenv("MCP_SCOPE")
+AUTHORITY = os.getenv("AUTHORITY")
+if not AUTHORITY and not DISABLE_AUTH and AAD_TENANT_ID:
+    AUTHORITY = f"https://login.microsoftonline.com/{AAD_TENANT_ID}"
+JWKS_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
+JWKS_CACHE: Dict[str, Dict[str, Any]] = {}
+JWKS_CACHE_EXPIRATION: Dict[str, float] = {}
+JWKS_CACHE_TTL_SECONDS = 3600
+
+logger = logging.getLogger("auth")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+
+
+def _fetch_jwks(tenant_id: str) -> Dict[str, Any]:
+    now = time.time()
+    cached = JWKS_CACHE.get(tenant_id)
+    expires_at = JWKS_CACHE_EXPIRATION.get(tenant_id, 0)
+    if cached and now < expires_at:
+        return cached
+
+    url = JWKS_URL_TEMPLATE.format(tenant=tenant_id)
+    try:
+        response = httpx.get(url, timeout=5.0)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to fetch Azure AD signing keys",
+        ) from exc
+
+    data = response.json()
+    JWKS_CACHE[tenant_id] = data
+    JWKS_CACHE_EXPIRATION[tenant_id] = now + JWKS_CACHE_TTL_SECONDS
+    return data
+
+
+def _build_public_key(token: str):
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from exc
+
+    kid = header.get("kid")
+    if not kid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing key id")
+
+    jwks = _fetch_jwks(AAD_TENANT_ID)
+    for jwk in jwks.get("keys", []):
+        if jwk.get("kid") == kid:
+            return RSAAlgorithm.from_jwk(json.dumps(jwk))
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Signing key not found")
+
+
+def _extract_email(claims: Dict[str, Any]) -> Optional[str]:
+    for claim_name in ("preferred_username", "upn", "email"):
+        value = claims.get(claim_name)
+        if value:
+            return value.lower()
+    return None
+
+
+def _enforce_allowed_domain(claims: Dict[str, Any]) -> None:
+    if not ALLOWED_EMAIL_DOMAIN_LOWER:
+        return
+    email = _extract_email(claims)
+    if not email or not email.endswith(ALLOWED_EMAIL_DOMAIN_LOWER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email domain not permitted")
+
+
+def _validate_jwt(token: str) -> Dict[str, Any]:
+    if DISABLE_AUTH:
+        return {"sub": "dev-anon"}
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    if not AAD_TENANT_ID or not EXPECTED_AUDIENCE:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication not configured")
+
+    public_key = _build_public_key(token)
+    issuer = f"https://login.microsoftonline.com/{AAD_TENANT_ID}/v2.0"
+    allowed_audiences = EXPECTED_AUDIENCES if len(EXPECTED_AUDIENCES) > 1 else EXPECTED_AUDIENCE
+    try:
+        claims = jwt.decode(
+            token,
+            key=public_key,
+            algorithms=["RS256"],
+            audience=allowed_audiences,
+            issuer=issuer,
+            options={"verify_aud": True, "verify_signature": True},
+        )
+    except jwt.PyJWTError as exc:
+        logger.warning("JWT validation failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token validation failed") from exc
+
+    _enforce_allowed_domain(claims)
+    return claims
+
 
 def verify_token(authorization: str | None = Header(None, alias="Authorization")):
-    """Return bearer token or placeholder when auth disabled.
-
-    In production (DISABLE_AUTH=false) you should validate signature, issuer,
-    audience, expiry, scopes, etc. Here we keep it minimal.
-    """
+    """Validate Authorization header and return the raw bearer token."""
     if DISABLE_AUTH:
         return "dev-anon-token"
-    # Minimal check (can be expanded):
     if not authorization or not authorization.startswith("Bearer "):
-        # For stricter behavior we could raise HTTPException(401,...)
-        return None
-    return authorization.split(" ", 1)[1]
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1]
+    _validate_jwt(token)
+    return token
 
 # ------------------------------------------------------------------  
 # Bring project root onto the path & load your agent dynamically  
 # ------------------------------------------------------------------  
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  
 
-# Available agent modules that can be selected
-AVAILABLE_AGENTS = [
+# Available agent modules (configurable via AGENT_MODULES env var, comma separated)
+DEFAULT_AVAILABLE_AGENTS = [
     "agents.agent_framework.single_agent",
     "agents.agent_framework.multi_agent.handoff_multi_domain_agent",
     "agents.agent_framework.multi_agent.magentic_group",
@@ -76,8 +188,17 @@ AVAILABLE_AGENTS = [
     "agents.agent_framework.multi_agent.reflection_workflow_agent",
 ]
 
+def _load_available_agents() -> List[str]:
+    raw = os.getenv("AGENT_MODULES")
+    if not raw:
+        return DEFAULT_AVAILABLE_AGENTS
+    modules = [module.strip() for module in raw.split(",") if module.strip()]
+    return modules or DEFAULT_AVAILABLE_AGENTS
+
+AVAILABLE_AGENTS = _load_available_agents()
+
 # Current active agent module (can be changed at runtime)
-CURRENT_AGENT_MODULE = os.getenv("AGENT_MODULE", AVAILABLE_AGENTS[0])
+CURRENT_AGENT_MODULE = AVAILABLE_AGENTS[0]
 
 def load_agent_class(module_path: str):
     """Dynamically load and return the Agent class from the given module path."""
@@ -170,6 +291,27 @@ class ConversationHistoryResponse(BaseModel):
   
 class SessionResetRequest(BaseModel):  
     session_id: str  
+  
+
+class AuthConfigResponse(BaseModel):
+    authEnabled: bool
+    clientId: Optional[str] = None
+    authority: Optional[str] = None
+    scope: Optional[str] = None
+    allowedDomain: Optional[str] = None
+
+
+@app.get("/auth/config", response_model=AuthConfigResponse)
+async def get_auth_config():
+    if DISABLE_AUTH:
+        return AuthConfigResponse(authEnabled=False)
+    return AuthConfigResponse(
+        authEnabled=True,
+        clientId=FRONTEND_CLIENT_ID,
+        authority=AUTHORITY,
+        scope=AAD_API_SCOPE,
+        allowedDomain=ALLOWED_EMAIL_DOMAIN or None,
+    )
   
 @app.post("/chat", response_model=ChatResponse)  
 async def chat(req: ChatRequest, token: str = Depends(verify_token)):  
@@ -296,6 +438,22 @@ async def ws_chat(ws: WebSocket):
             session_id = data.get("session_id")
             prompt = data.get("prompt")
             token = data.get("access_token")  # optional
+
+            if DISABLE_AUTH:
+                token = token or "dev-anon-token"
+            else:
+                if not token:
+                    await ws.send_json({"type": "error", "message": "Missing access_token"})
+                    continue
+                try:
+                    _validate_jwt(token)
+                except HTTPException as exc:
+                    await ws.send_json({
+                        "type": "error",
+                        "message": exc.detail or "Unauthorized",
+                        "status": exc.status_code,
+                    })
+                    continue
 
             if not session_id:
                 await ws.send_json({"type": "error", "message": "Missing session_id"})

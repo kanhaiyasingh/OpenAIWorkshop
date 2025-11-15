@@ -18,6 +18,24 @@ param mcpImageName string = ''
 @description('Application container image')
 param appImageName string = ''
 
+@description('AAD tenant ID to use for Entra ID authentication. Empty to use the current tenant.')
+param aadTenantId string = ''
+
+@description('Client ID of the frontend/public client application requesting tokens. Leave empty to create/manage via hooks.')
+param aadFrontendClientId string = ''
+
+@description('App ID URI (audience) for the protected API. Leave empty to skip auth configuration.')
+param aadApiAudience string = ''
+
+@description('Allowed e-mail domain for authenticated users.')
+param allowedEmailDomain string = 'microsoft.com'
+
+@description('String flag read from azd env that determines whether backend auth is disabled.')
+param disableAuthSetting string = 'false'
+
+var effectiveTenantId = !empty(aadTenantId) ? aadTenantId : tenant().tenantId
+var authDisabled = toLower(disableAuthSetting) == 'true'
+
 // Tags to apply to all resources
 var tags = {
   'azd-env-name': environmentName
@@ -136,6 +154,11 @@ module application './modules/application.bicep' = {
     mcpServiceUrl: mcpService.outputs.serviceUrl
     imageName: appImageName
     tags: tags
+    aadTenantId: effectiveTenantId
+    aadClientId: aadFrontendClientId
+    aadApiAudience: aadApiAudience
+    disableAuth: authDisabled
+    allowedEmailDomain: allowedEmailDomain
   }
 }
 

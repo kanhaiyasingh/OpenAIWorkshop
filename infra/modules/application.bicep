@@ -30,6 +30,21 @@ param mcpServiceUrl string
 @description('Resource tags')
 param tags object
 
+@description('AAD tenant ID used for authentication enforcement. Empty to fallback to the current tenant context.')
+param aadTenantId string = ''
+
+@description('Public client ID requesting tokens (frontend).')
+param aadClientId string = ''
+
+@description('App ID URI (audience) for the protected API.')
+param aadApiAudience string = ''
+
+@description('Whether to disable auth in the backend.')
+param disableAuth bool = true
+
+@description('Allowed e-mail domain for authenticated users when auth is enabled.')
+param allowedEmailDomain string = 'microsoft.com'
+
 @description('Container image tag')
 param imageTag string = 'latest'
 
@@ -42,6 +57,9 @@ var azdTags = union(tags, {
   'azd-service-name': 'app'
   'azd-service-type': 'containerapp'
 })
+var effectiveTenantId = !empty(aadTenantId) ? aadTenantId : tenant().tenantId
+var apiAudience = aadApiAudience
+var aadAuthority = !empty(effectiveTenantId) ? '${environment().authentication.loginEndpoint}${effectiveTenantId}' : ''
 
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' existing = {
   name: containerRegistryName
@@ -123,7 +141,7 @@ resource application 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'DISABLE_AUTH'
-              value: 'true'
+              value: string(disableAuth)
             }
             {
               name: 'AGENT_MODULE'
@@ -144,6 +162,34 @@ resource application 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'HANDOFF_CONTEXT_TRANSFER_TURNS'
               value: '-1'
+            }
+            {
+              name: 'AAD_TENANT_ID'
+              value: effectiveTenantId
+            }
+            {
+              name: 'TENANT_ID'
+              value: effectiveTenantId
+            }
+            {
+              name: 'CLIENT_ID'
+              value: aadClientId
+            }
+            {
+              name: 'AUTHORITY'
+              value: aadAuthority
+            }
+            {
+              name: 'MCP_API_AUDIENCE'
+              value: apiAudience
+            }
+            {
+              name: 'AAD_API_SCOPE'
+              value: !empty(apiAudience) ? '${apiAudience}/user_impersonation' : ''
+            }
+            {
+              name: 'ALLOWED_EMAIL_DOMAIN'
+              value: allowedEmailDomain
             }
           ]
         }

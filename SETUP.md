@@ -70,19 +70,16 @@ MCP_SERVER_URI="http://localhost:8000/mcp"
 ############################################  
   
 ############################################  
-#         Agent module to be executed      #  
+#   Agent modules offered in the UI        #  
 ############################################  
-# AGENT_MODULE="agents.autogen.multi_agent.reflection_agent"
-# AGENT_MODULE="agents.autogen.single_agent.loop_agent"
-# AGENT_MODULE="agents.autogen.multi_agent.collaborative_multi_agent_round_robin"
-# AGENT_MODULE="agents.autogen.multi_agent.collaborative_multi_agent_selector_group"
-# AGENT_MODULE="agents.autogen.multi_agent.handoff_multi_domain_agent"
-# AGENT_MODULE="agents.agent_framework.single_agent"
-# AGENT_MODULE="agents.agent_framework.multi_agent.handoff_multi_domain_agent"
-# AGENT_MODULE="agents.agent_framework.multi_agent.magentic_group"
-# AGENT_MODULE="agents.semantic_kernel.multi_agent.collaborative_multi_agent"
-# AGENT_MODULE="agents.semantic_kernel.multi_agent.a2a.collaborative_multi_agent"
-AGENT_MODULE="agents.autogen.single_agent.loop_agent"  
+# Provide a comma-separated list. The backend loads the first entry
+# on startup and the frontend selector lists every module in the string.
+AGENT_MODULES="agents.agent_framework.multi_agent.reflection_workflow_agent,agents.agent_framework.single_agent,agents.agent_framework.multi_agent.handoff_multi_domain_agent"
+
+# Example lists you can paste into AGENT_MODULES:
+# AGENT_MODULES="agents.autogen.single_agent.loop_agent,agents.autogen.multi_agent.collaborative_multi_agent_selector_group"
+# AGENT_MODULES="agents.semantic_kernel.multi_agent.collaborative_multi_agent,agents.semantic_kernel.multi_agent.a2a.collaborative_multi_agent"
+# AGENT_MODULES="scenarios.durable_agent.loop_agent,scenarios.progress_update.loop_agent_progress"  
   
 # -----------------------------------------------------------  
 # If you are experimenting with Logistics-A2A, uncomment:  
