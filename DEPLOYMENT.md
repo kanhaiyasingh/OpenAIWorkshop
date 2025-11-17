@@ -19,55 +19,121 @@ This guide walks through deploying the OpenAI Workshop application to Azure usin
 
 ## Architecture Overview
 
-### Azure Services
+### Standard Deployment (Public Access)
 
+```mermaid
+graph TB
+    subgraph Azure["Azure Subscription"]
+        subgraph RG["Resource Group: rg-agenticaiworkshop"]
+            subgraph Internet["Public Internet"]
+                User["👤 End User"]
+            end
+            
+            subgraph CAE["Container Apps Environment"]
+                App["🚀 Application Container<br/>FastAPI + React<br/>Port: 3000<br/>Replicas: 1-5"]
+                MCP["🔧 MCP Service<br/>Port: 8000<br/>Replicas: 1-3"]
+            end
+            
+            OpenAI["🤖 Azure OpenAI<br/>- GPT-5-Chat<br/>- text-embedding-ada-002"]
+            Cosmos["💾 Cosmos DB<br/>- Customers<br/>- Products<br/>- Agent State<br/>(Public Access)"]
+            ACR["📦 Container Registry<br/>- mcp-service<br/>- workshop-app"]
+            Logs["📊 Log Analytics<br/>Workspace"]
+        end
+    end
+    
+    User -->|HTTPS| App
+    App -->|Internal| MCP
+    App -->|API Calls| OpenAI
+    App -->|Read/Write<br/>Public Endpoint| Cosmos
+    MCP -->|Data Access<br/>Public Endpoint| Cosmos
+    CAE -->|Metrics| Logs
+    ACR -.->|Pull Images| CAE
+    
+    style App fill:#0078d4,color:#fff
+    style MCP fill:#0078d4,color:#fff
+    style Cosmos fill:#00c851,color:#fff
+    style OpenAI fill:#ff6b35,color:#fff
+    style Internet fill:#e3f2fd,color:#000
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Azure Subscription                      │
-│                                                               │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │            Resource Group (openai-workshop-dev-rg)      │ │
-│  │                                                          │ │
-│  │  ┌──────────────┐    ┌────────────────┐                │ │
-│  │  │ Azure OpenAI │    │   Cosmos DB    │                │ │
-│  │  │              │    │                │                │ │
-│  │  │ - GPT-5-Chat │    │ - Customers    │                │ │
-│  │  │ - Embeddings │    │ - Products     │                │ │
-│  │  └──────────────┘    │ - Agent State  │                │ │
-│  │                      └────────────────┘                 │ │
-│  │                                                          │ │
-│  │  ┌────────────────────────────────────────────────────┐ │ │
-│  │  │       Container Apps Environment                   │ │ │
-│  │  │  ┌───────────────┐    ┌────────────────────────┐  │ │ │
-│  │  │  │  MCP Service  │    │    Application         │  │ │ │
-│  │  │  │               │◄───┤                        │  │ │ │
-│  │  │  │  Port: 8000   │    │  Backend: FastAPI      │  │ │ │
-│  │  │  │  Auto-scale   │    │  Frontend: React       │  │ │ │
-│  │  │  │  1-3 replicas │    │  Port: 3000            │  │ │ │
-│  │  │  └───────────────┘    │  Auto-scale: 1-5       │  │ │ │
-│  │  │                       └────────────────────────┘  │ │ │
-│  │  └────────────────────────────────────────────────────┘ │ │
-│  │                                                          │ │
-│  │  ┌─────────────────┐    ┌──────────────────────────┐  │ │
-│  │  │  Container      │    │  Log Analytics           │  │ │
-│  │  │  Registry (ACR) │    │  Workspace               │  │ │
-│  │  │                 │    │                          │  │ │
-│  │  │  - mcp-service  │    │  - Container logs        │  │ │
-│  │  │  - workshop-app │    │  - Metrics & monitoring  │  │ │
-│  │  └─────────────────┘    └──────────────────────────┘  │ │
-│  │                                                          │ │
-│  └──────────────────────────────────────────────────────────┘ │
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
+
+### Secured Deployment (VNet + Private Endpoint)
+
+```mermaid
+graph TB
+    subgraph Azure["Azure Subscription"]
+        subgraph RG["Resource Group: rg-agenticaiworkshop"]
+            subgraph Internet["Public Internet"]
+                User["👤 End User"]
+                Dev["👨‍💻 Developer<br/>(Azure AD Identity)"]
+            end
+            
+            subgraph VNet["Virtual Network (10.90.0.0/16)"]
+                subgraph CASubnet["Container Apps Subnet<br/>(10.90.0.0/23)"]
+                    subgraph CAE["Container Apps Environment<br/>(VNet-Injected)"]
+                        Identity["🔐 User-Assigned<br/>Managed Identity"]
+                        App["🚀 Application Container<br/>FastAPI + React<br/>Port: 3000<br/>Replicas: 1-5"]
+                        MCP["🔧 MCP Service<br/>Port: 8000<br/>Replicas: 1-3"]
+                    end
+                end
+                
+                subgraph PESubnet["Private Endpoint Subnet<br/>(10.90.2.0/24)"]
+                    PE["🔒 Private Endpoint<br/>Cosmos DB"]
+                end
+                
+                DNS["🌐 Private DNS Zone<br/>documents.azure.com"]
+            end
+            
+            OpenAI["🤖 Azure OpenAI<br/>- GPT-5-Chat<br/>- text-embedding-ada-002<br/>(Public Access)"]
+            Cosmos["💾 Cosmos DB<br/>- Customers<br/>- Products<br/>- Agent State<br/>(No Public Access)"]
+            ACR["📦 Container Registry<br/>- mcp-service<br/>- workshop-app"]
+            Logs["📊 Log Analytics<br/>Workspace"]
+            RBAC["👥 Cosmos DB RBAC<br/>Data Plane Roles"]
+        end
+    end
+    
+    User -->|HTTPS| App
+    App -->|Internal| MCP
+    App -->|API Calls| OpenAI
+    Identity -->|"Authenticate (No Secrets)"| Cosmos
+    App -->|"Private Link<br/>via Managed Identity"| PE
+    MCP -->|"Private Link<br/>via Managed Identity"| PE
+    PE -.->|Private IP| Cosmos
+    DNS -.->|DNS Resolution| PE
+    Dev -->|"Azure AD Auth<br/>Data Plane RBAC"| Cosmos
+    CAE -->|Metrics| Logs
+    ACR -.->|Pull Images| CAE
+    Identity -.->|Assigned Roles| RBAC
+    
+    style App fill:#0078d4,color:#fff
+    style MCP fill:#0078d4,color:#fff
+    style Cosmos fill:#00c851,color:#fff
+    style OpenAI fill:#ff6b35,color:#fff
+    style Identity fill:#ff4444,color:#fff
+    style PE fill:#6c757d,color:#fff
+    style VNet fill:#e8f5e9,color:#000
+    style CASubnet fill:#c8e6c9,color:#000
+    style PESubnet fill:#c8e6c9,color:#000
+    style Internet fill:#e3f2fd,color:#000
+    style RBAC fill:#fff3cd,color:#000
 ```
 
 ### Traffic Flow
 
-1. User → **Application Container** (Port 3000)
+#### Standard Deployment:
+1. User → **Application Container** (Port 3000) - Public HTTPS
 2. Application → **MCP Service** (internal communication)
-3. Application → **Azure OpenAI** (GPT-5-Chat API)
-4. Application → **Cosmos DB** (state persistence)
-5. MCP Service → **Cosmos DB** (customer data access)
+3. Application → **Azure OpenAI** (GPT-5-Chat API) - Public endpoint
+4. Application → **Cosmos DB** (state persistence) - Public endpoint with key auth
+5. MCP Service → **Cosmos DB** (customer data access) - Public endpoint with key auth
+
+#### Secured Deployment:
+1. User → **Application Container** (Port 3000) - Public HTTPS ingress
+2. Application → **MCP Service** (internal VNet communication)
+3. Application → **Azure OpenAI** (GPT-5-Chat API) - Public endpoint
+4. Application → **Private Endpoint** → **Cosmos DB** - Private IP, no internet exposure
+5. MCP Service → **Private Endpoint** → **Cosmos DB** - Private IP, no internet exposure
+6. **Managed Identity** → **Cosmos DB RBAC** - No connection strings, Azure AD auth only
+7. Developer → **Cosmos DB** - Azure AD auth with data plane roles for local tooling
 
 ## Prerequisites
 
