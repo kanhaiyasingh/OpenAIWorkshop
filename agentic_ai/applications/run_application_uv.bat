@@ -9,6 +9,12 @@ for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
 
 pushd "%SCRIPT_DIR%"
 
+REM Fix OneDrive hardlink issues with uv - use copy mode
+set "UV_LINK_MODE=copy"
+
+REM Move .venv outside OneDrive to avoid file locking issues
+set "UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%\uv\envs\agentic_ai_applications\.venv"
+
 REM Ensure the applications package is importable when using uv run
 set "PYTHONPATH=%PROJECT_ROOT%"
 

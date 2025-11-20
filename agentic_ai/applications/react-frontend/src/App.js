@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
 import {
   Box,
   Container,
@@ -21,6 +22,12 @@ import {
   ThemeProvider,
   createTheme,
   CssBaseline,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Alert,
+  Snackbar,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -39,7 +46,20 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { v4 as uuidv4 } from 'uuid';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:7000';
+const resolveBackendUrl = () => {
+  if (process.env.REACT_APP_BACKEND_URL) {
+    return process.env.REACT_APP_BACKEND_URL;
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost') {
+      return 'http://localhost:7000';
+    }
+    return window.location.origin;
+  }
+  return 'http://localhost:7000';
+};
+
+const BACKEND_URL = resolveBackendUrl();
 const WS_URL = BACKEND_URL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/chat';
 
 const theme = createTheme({
@@ -70,9 +90,51 @@ function App() {
   const [currentTurn, setCurrentTurn] = useState(0); // Track conversation turn for tool call grouping
   const [lastFinalAnswer, setLastFinalAnswer] = useState(null); // Track last final answer for deduplication
 
+  const [authConfig, setAuthConfig] = useState({ authEnabled: false });
+  const [authConfigLoaded, setAuthConfigLoaded] = useState(false);
+  const [msalApp, setMsalApp] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+
+  // Agent selection state
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [currentAgent, setCurrentAgent] = useState('');
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
+
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const processEndRef = useRef(null);
+  const authPromptedRef = useRef(false);
+
+  const isAuthEnabled = authConfig.authEnabled;
+  const isSignedIn = !!accessToken;
+  const canInteract = !isAuthEnabled || (isSignedIn && authConfigLoaded);
+  const shouldBlockUi = isAuthEnabled && authConfigLoaded && !isSignedIn;
+  const inputPlaceholder = canInteract ? 'Type your message...' : 'Sign in to chat…';
+
+  const buildAuthHeaders = () => (accessToken ? { Authorization: `Bearer ${accessToken}` } : {});
+
+  const acquireAccessToken = async (instance, activeAccount, scope) => {
+    if (!instance || !activeAccount || !scope) {
+      return null;
+    }
+    try {
+      const result = await instance.acquireTokenSilent({
+        scopes: [scope],
+        account: activeAccount,
+      });
+      return result.accessToken;
+    } catch (error) {
+      if (error instanceof InteractionRequiredAuthError) {
+        const interactiveResult = await instance.acquireTokenPopup({
+          scopes: [scope],
+          account: activeAccount,
+        });
+        return interactiveResult.accessToken;
+      }
+      throw error;
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,6 +148,146 @@ function App() {
   useEffect(scrollProcessToBottom, [orchestratorEvents, agentEvents]);
 
   useEffect(() => {
+    const loadAuthConfig = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/auth/config`);
+        const data = await response.json();
+        setAuthConfig(data);
+
+        if (data.authEnabled && data.clientId && data.authority) {
+          const instance = new PublicClientApplication({
+            auth: {
+              clientId: data.clientId,
+              authority: data.authority,
+              redirectUri: window.location.origin,
+            },
+            cache: {
+              cacheLocation: 'sessionStorage',
+              storeAuthStateInCookie: false,
+            },
+          });
+          await instance.initialize();
+          setMsalApp(instance);
+          const existingAccount = instance.getActiveAccount() || instance.getAllAccounts()[0];
+          if (existingAccount) {
+            instance.setActiveAccount(existingAccount);
+            setAccount(existingAccount);
+            const token = await acquireAccessToken(instance, existingAccount, data.scope);
+            if (token) {
+              setAccessToken(token);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading auth config:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to load auth configuration',
+          severity: 'error',
+        });
+      } finally {
+        setAuthConfigLoaded(true);
+      }
+    };
+
+    loadAuthConfig();
+  }, []);
+
+  useEffect(() => {
+    const attemptInteractiveLogin = async () => {
+      if (!msalApp || !authConfig.scope) {
+        return;
+      }
+      const existingAccount = msalApp.getActiveAccount() || msalApp.getAllAccounts()[0];
+      if (existingAccount) {
+        msalApp.setActiveAccount(existingAccount);
+        setAccount(existingAccount);
+        const token = await acquireAccessToken(msalApp, existingAccount, authConfig.scope);
+        if (token) {
+          setAccessToken(token);
+        }
+        return;
+      }
+
+      if (authPromptedRef.current) {
+        return;
+      }
+      authPromptedRef.current = true;
+      try {
+        const response = await msalApp.loginPopup({
+          scopes: [authConfig.scope],
+          prompt: 'select_account',
+        });
+        msalApp.setActiveAccount(response.account);
+        setAccount(response.account);
+        const token = response.accessToken || (await acquireAccessToken(msalApp, response.account, authConfig.scope));
+        if (token) {
+          setAccessToken(token);
+        }
+      } catch (error) {
+        console.error('Automatic sign-in failed:', error);
+        setSnackbar({
+          open: true,
+          message: 'Sign-in required to continue',
+          severity: 'warning',
+        });
+        authPromptedRef.current = false;
+      }
+    };
+
+    if (authConfigLoaded && authConfig.authEnabled && !accessToken) {
+      attemptInteractiveLogin();
+    }
+  }, [authConfigLoaded, authConfig, msalApp, accessToken]);
+
+  // Fetch available agents on component mount
+  useEffect(() => {
+    const fetchAgents = async () => {
+      if (!authConfigLoaded) {
+        return;
+      }
+      if (isAuthEnabled && !accessToken) {
+        return;
+      }
+      try {
+        const response = await fetch(`${BACKEND_URL}/agents`, {
+          headers: {
+            ...buildAuthHeaders(),
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const agents = Array.isArray(data.agents) ? data.agents : [];
+        setAvailableAgents(agents);
+        setCurrentAgent(data.current_agent ?? (agents[0]?.module_path || ''));
+      } catch (error) {
+        console.error('Error fetching agents:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to load available agents',
+          severity: 'error',
+        });
+      }
+    };
+    fetchAgents();
+  }, [authConfigLoaded, isAuthEnabled, accessToken]);
+
+  useEffect(() => {
+    if (isAuthEnabled && !accessToken) {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      return;
+    }
+    if (!authConfigLoaded) {
+      return;
+    }
+
     // Connect to WebSocket
     const connectWebSocket = () => {
       const ws = new WebSocket(WS_URL);
@@ -95,7 +297,7 @@ function App() {
         // Register session
         ws.send(JSON.stringify({
           session_id: sessionId,
-          access_token: null,
+          access_token: isAuthEnabled ? accessToken : null,
         }));
       };
 
@@ -124,7 +326,7 @@ function App() {
         wsRef.current.close();
       }
     };
-  }, [sessionId]);
+  }, [sessionId, isAuthEnabled, accessToken, authConfigLoaded]);
 
   const handleWebSocketMessage = (event) => {
     const { type } = event;
@@ -294,6 +496,10 @@ function App() {
 
   const handleSend = () => {
     if (!input.trim() || !wsRef.current || isProcessing) return;
+    if (isAuthEnabled && !accessToken) {
+      setSnackbar({ open: true, message: 'Sign in to chat', severity: 'warning' });
+      return;
+    }
 
     // Increment turn for this new request
     setCurrentTurn((prev) => prev + 1);
@@ -317,7 +523,7 @@ function App() {
     wsRef.current.send(JSON.stringify({
       session_id: sessionId,
       prompt: input,
-      access_token: null,
+      access_token: isAuthEnabled ? accessToken : null,
     }));
 
     setInput('');
@@ -325,6 +531,10 @@ function App() {
   };
 
   const handleNewSession = async () => {
+    if (isAuthEnabled && !accessToken) {
+      setSnackbar({ open: true, message: 'Sign in to start a session', severity: 'warning' });
+      return;
+    }
     // Generate new session ID
     const newSessionId = uuidv4();
     
@@ -347,7 +557,7 @@ function App() {
     try {
       await fetch(`${BACKEND_URL}/reset_session`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
         body: JSON.stringify({ session_id: sessionId }),
       });
     } catch (error) {
@@ -358,7 +568,86 @@ function App() {
     setSessionId(newSessionId);
   };
 
+  const handleSignIn = async () => {
+    if (!msalApp || !authConfig.scope) {
+      setSnackbar({ open: true, message: 'Auth is not ready yet', severity: 'warning' });
+      return;
+    }
+    try {
+      const response = await msalApp.loginPopup({ scopes: [authConfig.scope] });
+      msalApp.setActiveAccount(response.account);
+      setAccount(response.account);
+      const token = response.accessToken || (await acquireAccessToken(msalApp, response.account, authConfig.scope));
+      if (token) {
+        setAccessToken(token);
+      }
+    } catch (error) {
+      console.error('Sign-in failed:', error);
+      setSnackbar({ open: true, message: 'Sign-in failed', severity: 'error' });
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (!msalApp) {
+      return;
+    }
+    try {
+      await msalApp.logoutPopup({ account: msalApp.getActiveAccount() ?? undefined });
+    } catch (error) {
+      console.error('Sign-out failed:', error);
+    } finally {
+      setAccount(null);
+      setAccessToken(null);
+    }
+  };
+
+  const handleAgentChange = async (event) => {
+    const newAgentModule = event.target.value;
+    if (isAuthEnabled && !accessToken) {
+      setSnackbar({ open: true, message: 'Sign in to change agents', severity: 'warning' });
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/agents/set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+        body: JSON.stringify({ module_path: newAgentModule }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setCurrentAgent(newAgentModule);
+        setSnackbar({
+          open: true,
+          message: `Agent changed successfully to ${newAgentModule.split('.').pop().replace(/_/g, ' ')}`,
+          severity: 'success',
+        });
+        
+        // Start a new session when agent changes
+        handleNewSession();
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Failed to change agent: ${data.message}`,
+          severity: 'error',
+        });
+      }
+    } catch (error) {
+      console.error('Error changing agent:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to change agent',
+        severity: 'error',
+      });
+    }
+  };
+
   const handleKeyPress = (e) => {
+    if (!canInteract) {
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -400,6 +689,53 @@ function App() {
     if (agentId.includes('security') || agentId.includes('auth')) return '🔒';
     return '🤖';
   };
+
+  if (shouldBlockUi) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box
+          sx={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 3,
+            bgcolor: 'background.default',
+            p: 3,
+          }}
+        >
+          <Paper sx={{ p: 4, maxWidth: 420, textAlign: 'center' }} elevation={6}>
+            <Typography variant="h5" gutterBottom>
+              Sign in to continue
+            </Typography>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              This workspace requires Microsoft Entra ID authentication before showing the agents.
+            </Typography>
+            <LinearProgress sx={{ mb: 2 }} />
+            <Button variant="contained" onClick={handleSignIn} disabled={!msalApp || !authConfig.scope}>
+              Sign in with Microsoft
+            </Button>
+          </Paper>
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={4000}
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert
+              onClose={() => setSnackbar({ ...snackbar, open: false })}
+              severity={snackbar.severity}
+              sx={{ width: '100%' }}
+            >
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
+        </Box>
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider theme={theme}>
@@ -574,11 +910,65 @@ function App() {
               <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
                 🤖 Magentic AI Assistant
               </Typography>
+
+              {isAuthEnabled && (
+                isSignedIn ? (
+                  <Button color="inherit" onClick={handleSignOut} sx={{ mr: 2 }}>
+                    Sign out {account?.username ? `(${account.username})` : ''}
+                  </Button>
+                ) : (
+                  <Button color="inherit" onClick={handleSignIn} disabled={!authConfigLoaded} sx={{ mr: 2 }}>
+                    Sign in
+                  </Button>
+                )
+              )}
+              
+              {/* Agent Selector */}
+              <FormControl sx={{ minWidth: 250, mr: 2 }} size="small">
+                <InputLabel id="agent-select-label" sx={{ color: 'white' }}>
+                  Active Agent
+                </InputLabel>
+                <Select
+                  labelId="agent-select-label"
+                  value={currentAgent}
+                  label="Active Agent"
+                  onChange={handleAgentChange}
+                  disabled={isProcessing || !canInteract}
+                  sx={{
+                    color: 'white',
+                    '.MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'rgba(255, 255, 255, 0.3)',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'rgba(255, 255, 255, 0.5)',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'white',
+                    },
+                    '.MuiSvgIcon-root': {
+                      color: 'white',
+                    },
+                  }}
+                >
+                  {(Array.isArray(availableAgents) ? availableAgents : []).map((agent) => (
+                    <MenuItem key={agent.module_path} value={agent.module_path}>
+                      <Box>
+                        <Typography variant="body2">{agent.display_name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {agent.description}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              
               <Button
                 color="inherit"
                 onClick={handleNewSession}
                 startIcon={<AddIcon />}
                 sx={{ mr: 2 }}
+                disabled={!canInteract}
               >
                 New Session
               </Button>
@@ -649,16 +1039,16 @@ function App() {
                   fullWidth
                   multiline
                   maxRows={4}
-                  placeholder="Type your message..."
+                  placeholder={inputPlaceholder}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  disabled={isProcessing}
+                  disabled={isProcessing || !canInteract}
                 />
                 <IconButton
                   color="primary"
                   onClick={handleSend}
-                  disabled={!input.trim() || isProcessing}
+                  disabled={!input.trim() || isProcessing || !canInteract}
                   sx={{ alignSelf: 'flex-end' }}
                 >
                   <SendIcon />
@@ -667,6 +1057,22 @@ function App() {
             </Container>
           </Paper>
         </Box>
+        
+        {/* Snackbar for notifications */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            severity={snackbar.severity}
+            sx={{ width: '100%' }}
+          >
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Box>
     </ThemeProvider>
   );
