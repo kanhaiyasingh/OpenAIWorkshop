@@ -407,9 +407,10 @@ async def set_active_agent(req: SetAgentRequest, token: str = Depends(verify_tok
             "current_agent": CURRENT_AGENT_MODULE
         }
     except Exception as e:
+        logging.exception("Failed to load agent:")
         return {
             "status": "error",
-            "message": f"Failed to load agent: {str(e)}"
+            "message": "Failed to load agent."
         }
 
 # ──────────────────────────────────────────────────────────────
