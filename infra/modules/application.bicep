@@ -91,7 +91,7 @@ var cosmosSecretEntries = (!useCosmosManagedIdentity && !empty(cosmosDbKey)) ? [
 
 var cosmosEndpointEnv = !empty(cosmosDbEndpoint) ? [
   {
-    name: 'COSMOSDB_ENDPOINT'
+    name: 'COSMOS_ENDPOINT'
     value: cosmosDbEndpoint
   }
 ] : []
@@ -198,7 +198,7 @@ resource application 'Microsoft.App/containerApps@2023-05-01' = {
               value: azureOpenAIDeploymentName
             }
             {
-              name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
+              name: 'AZURE_OPENAI_EMB_DEPLOYMENT'
               value: azureOpenAIEmbeddingDeploymentName
             }
             {
