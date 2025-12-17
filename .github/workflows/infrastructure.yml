@@ -132,14 +132,14 @@ jobs:
     needs: [tf, bicep]
     if: always() && (needs.tf.result == 'success' || needs.bicep.result == 'success')
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.base_ref == 'main' && 'prod') || (github.base_ref == 'int-agentic' && 'integration') || 'dev' }}
     permissions:
       id-token: write
       contents: read    
 
     steps:
       - uses: actions/checkout@v6
-      
+
       - name: Azure OIDC Login
         uses: azure/login@v2
         with:
