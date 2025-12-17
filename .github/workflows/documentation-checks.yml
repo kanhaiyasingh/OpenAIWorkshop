@@ -1,7 +1,5 @@
 name: Link Check
 
-on:
-
 jobs:
   link-check:
     runs-on: ubuntu-latest
