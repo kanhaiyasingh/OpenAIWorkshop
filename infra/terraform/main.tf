@@ -8,7 +8,7 @@ locals {
   ai_hub_name = "aih-${var.project_name}-${local.env}-${var.iteration}"
   model_endpoint = "https://${local.ai_hub_name}.openai.azure.com/openai/v1/chat/completions"
   openai_endpoint = "https://${local.ai_hub_name}.openai.azure.com"
-  key_vault_name       = "kv-${substr(local.name_prefix, 0, 14)}-${substr(var.iteration, 0, 2)}"
+  key_vault_name       = "kv-${substr(local.name_prefix, 0, 14)}-${substr(var.iteration, -2, -1)}"
   web_app_name_prefix  = "${local.name_prefix}-${var.iteration}"
 
   common_tags = { env = local.env, project = var.project_name }
