@@ -57,7 +57,14 @@ jobs:
           json=$(az keyvault list --query "[].{name: name, rg: resourceGroup}" | jq .[])
           name=$(jq -r '.name' <<< $json)
           rg=$(jq -r '.rg' <<< $json)
-          az keyvault update -g $rg -n $name --default-action allow --public-network-access Enabled
+          if [[ -z "$name" || -z "$rg" ]]; then
+            echo "No key vault existing in this sub."
+          else
+            if [[ "$rg" == *"OpenAIWorkshop"* ]]; then
+              echo "We do have an OpenAIWorkshop rg. Assume that this KV is intended for this project"
+              az keyvault update -g $rg -n $name --default-action allow --public-network-access Enabled
+            fi
+          fi
           
 
 
