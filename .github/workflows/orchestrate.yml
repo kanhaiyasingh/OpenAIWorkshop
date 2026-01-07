@@ -54,9 +54,9 @@ jobs:
           az storage account update --resource-group ${{ vars.TFSTATE_RG }} --name ${{ vars.TFSTATE_ACCOUNT }} --public-network-access Enabled
           
 
-  build-backend-container:
+  build-application-container:
     needs: preflight
-    uses: ./.github/workflows/docker-fastapi.yml
+    uses: ./.github/workflows/docker-application.yml
     with:
       environment: >-
         ${{
@@ -93,7 +93,7 @@ jobs:
     secrets: inherit
 
   deploy-infrastructure:
-    needs: [ build-backend-container, build-mcp-container ]
+    needs: [ build-application-container, build-mcp-container ]
     uses: ./.github/workflows/infrastructure.yml
     with:
       environment: >-

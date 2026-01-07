@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: Build and Push Docker Image for FastAPI Backend
+name: Build and Push Docker Image for Application
 
 # Controls when the action will run. 
 on:
@@ -18,8 +18,8 @@ on:
   workflow_dispatch:
 
 env:
-    PROJECT_NAME: aoaiwkshp-backend
-    PROJECT_SUBPATH: agentic_ai/
+    PROJECT_NAME: aoaiwkshp-application
+    PROJECT_SUBPATH: agentic_ai/applications/
     SPECIFIC_RELEASE_TAG: ${{ inputs.environment && format('{0}-latest', inputs.environment) || vars.SPECIFIC_RELEASE_TAG || '' }}
 
 
