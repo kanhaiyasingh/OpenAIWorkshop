@@ -29,6 +29,9 @@ param enableNetworking bool = false
 @description('Enable private endpoints for Azure OpenAI and Cosmos DB')
 param enablePrivateEndpoints bool = false
 
+@description('Make MCP service internal-only (not exposed to public internet). Only apps in the same Container Apps environment can access it.')
+param mcpInternalOnly bool = false
+
 // Resource Group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: '${baseName}-${environmentName}-rg'
@@ -159,6 +162,8 @@ module mcpService 'modules/mcp-service.bicep' = {
     useCosmosManagedIdentity: useCosmosManagedIdentity
     userAssignedIdentityResourceId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.resourceId : ''
     userAssignedIdentityClientId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.clientId : ''
+    mcpInternalOnly: mcpInternalOnly
+    containerAppsEnvironmentDomain: containerAppsEnv.outputs.defaultDomain
     tags: tags
   }
 }

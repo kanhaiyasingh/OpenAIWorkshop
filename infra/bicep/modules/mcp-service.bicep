@@ -24,6 +24,12 @@ param imageTag string = 'latest'
 @description('Full container image name from azd')
 param imageName string = ''
 
+@description('Make MCP service internal-only (not exposed to public internet)')
+param mcpInternalOnly bool = false
+
+@description('Container Apps Environment default domain (required when mcpInternalOnly is true)')
+param containerAppsEnvironmentDomain string = ''
+
 var mcpServiceName = '${baseName}-mcp'
 var containerImage = !empty(imageName) ? imageName : '${containerRegistryName}.azurecr.io/mcp-service:${imageTag}'
 var azdTags = union(tags, {
@@ -88,7 +94,7 @@ resource mcpService 'Microsoft.App/containerApps@2023-05-01' = {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {
       ingress: {
-        external: true
+        external: !mcpInternalOnly
         targetPort: 8000
         transport: 'http'
         allowInsecure: false
@@ -138,6 +144,6 @@ resource mcpService 'Microsoft.App/containerApps@2023-05-01' = {
   tags: azdTags
 }
 
-output serviceUrl string = 'https://${mcpService.properties.configuration.ingress.fqdn}/mcp'
+output serviceUrl string = mcpInternalOnly ? 'http://${mcpService.name}.internal.${containerAppsEnvironmentDomain}/mcp' : 'https://${mcpService.properties.configuration.ingress.fqdn}/mcp'
 output serviceName string = mcpService.name
 output fqdn string = mcpService.properties.configuration.ingress.fqdn
