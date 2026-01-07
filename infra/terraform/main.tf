@@ -6,12 +6,20 @@ locals {
   asp_name = "asp-${var.project_name}-${local.env}"
   app_name = "app-${var.project_name}-${local.env}"
   ai_hub_name = "aih-${var.project_name}-${local.env}-${var.iteration}"
-  model_endpoint = "https://${local.ai_hub_name}.openai.azure.com/openai/v1/chat/completions"
-  openai_endpoint = "https://${local.ai_hub_name}.openai.azure.com"
+  ai_hub_subdomain = lower(local.ai_hub_name)  # Custom subdomain must be lowercase
+  model_endpoint = "https://${local.ai_hub_subdomain}.openai.azure.com/openai/v1/chat/completions"
+  openai_endpoint = "https://${local.ai_hub_subdomain}.openai.azure.com"
   key_vault_name       = "kv-${substr(local.name_prefix, 0, 14)}-${substr(var.iteration, -2, -1)}"
   web_app_name_prefix  = "${local.name_prefix}-${var.iteration}"
 
-  common_tags = { env = local.env, project = var.project_name }
+  # Merge user-provided tags with default tags
+  default_tags = {
+    env         = local.env
+    project     = var.project_name
+    ManagedBy   = "Terraform"
+    Application = "OpenAI-Workshop"
+  }
+  common_tags = merge(local.default_tags, var.tags)
 }
 
 
@@ -23,7 +31,7 @@ resource "azurerm_resource_group" "rg" {
 
 
 resource "azurerm_ai_services" "ai_hub" {
-  custom_subdomain_name              = local.ai_hub_name
+  custom_subdomain_name              = local.ai_hub_subdomain
   fqdns                              = []
   local_authentication_enabled       = true
   location                           = "East US 2"

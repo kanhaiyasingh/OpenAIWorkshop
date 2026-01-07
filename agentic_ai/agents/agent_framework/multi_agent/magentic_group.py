@@ -358,12 +358,28 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
         return self._manager_client
 
     def _build_chat_client(self) -> AzureOpenAIChatClient:
-        return AzureOpenAIChatClient(
-            api_key=self.azure_openai_key,
-            deployment_name=self.azure_deployment,
-            endpoint=self.azure_openai_endpoint,
-            api_version=self.api_version,
-        )
+        # Use API key if available, otherwise use credential-based authentication
+        if self.azure_openai_key:
+            logger.info("[AgentFramework-Magentic] Using API key authentication for Azure OpenAI")
+            return AzureOpenAIChatClient(
+                api_key=self.azure_openai_key,
+                deployment_name=self.azure_deployment,
+                endpoint=self.azure_openai_endpoint,
+                api_version=self.api_version,
+            )
+        elif self.azure_credential:
+            logger.info("[AgentFramework-Magentic] Using managed identity authentication for Azure OpenAI")
+            return AzureOpenAIChatClient(
+                credential=self.azure_credential,
+                deployment_name=self.azure_deployment,
+                endpoint=self.azure_openai_endpoint,
+                api_version=self.api_version,
+            )
+        else:
+            raise RuntimeError(
+                "Azure OpenAI authentication is not configured. Either set AZURE_OPENAI_API_KEY "
+                "or ensure managed identity is available for credential-based authentication."
+            )
 
     async def _resume_previous_run(
         self,

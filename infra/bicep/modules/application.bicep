@@ -36,10 +36,6 @@ param userAssignedIdentityClientId string = ''
 @description('Azure OpenAI endpoint URL')
 param azureOpenAIEndpoint string
 
-@description('Azure OpenAI API key')
-@secure()
-param azureOpenAIKey string
-
 @description('Azure OpenAI deployment name')
 param azureOpenAIDeploymentName string
 
@@ -169,10 +165,6 @@ resource application 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'registry-password'
           value: containerRegistry.listCredentials().passwords[0].value
         }
-        {
-          name: 'azure-openai-key'
-          value: azureOpenAIKey
-        }
       ], cosmosSecretEntries)
     }
     template: {
@@ -188,10 +180,6 @@ resource application 'Microsoft.App/containerApps@2023-05-01' = {
             {
               name: 'AZURE_OPENAI_ENDPOINT'
               value: azureOpenAIEndpoint
-            }
-            {
-              name: 'AZURE_OPENAI_API_KEY'
-              secretRef: 'azure-openai-key'
             }
             {
               name: 'AZURE_OPENAI_CHAT_DEPLOYMENT'

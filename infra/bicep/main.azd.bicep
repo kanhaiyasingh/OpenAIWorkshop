@@ -123,7 +123,6 @@ module application './modules/application.bicep' = {
     containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
     containerRegistryName: acr.outputs.registryName
     azureOpenAIEndpoint: openai.outputs.endpoint
-    azureOpenAIKey: openai.outputs.key
     azureOpenAIDeploymentName: openai.outputs.chatDeploymentName
     mcpServiceUrl: mcpService.outputs.serviceUrl
     cosmosDbEndpoint: cosmosdb.outputs.endpoint

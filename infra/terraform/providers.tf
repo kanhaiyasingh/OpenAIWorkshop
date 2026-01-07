@@ -14,15 +14,17 @@ terraform {
       version = "~> 3.4"
     }
   }
-  backend "azurerm" {
-    use_oidc = true
-    use_azuread_auth = true
-  }
+  # Backend configuration - uncomment for CI/CD with remote state
+  # backend "azurerm" {
+  #   use_oidc = true
+  #   use_azuread_auth = true
+  # }
 }
 
 
 provider "azurerm" {
-    features {
+  subscription_id = var.subscription_id
+  features {
     resource_group {
       prevent_deletion_if_contains_resources = false
     }
@@ -40,7 +42,6 @@ provider "azurerm" {
       purge_soft_delete_on_destroy = true
     }
   }
-  use_oidc = true
 }
 
 

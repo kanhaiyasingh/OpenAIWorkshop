@@ -30,18 +30,6 @@ resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   tags: tags
 }
 
-// Azure OpenAI Service
-module openai 'modules/openai.bicep' = {
-  scope: rg
-  name: 'openai-deployment'
-  params: {
-    location: location
-    baseName: baseName
-    environmentName: environmentName
-    tags: tags
-  }
-}
-
 // Cosmos DB with containers
 module cosmosdb 'modules/cosmosdb.bicep' = {
   scope: rg
@@ -102,6 +90,20 @@ module containerAppsIdentity 'modules/managed-identity.bicep' = {
   }
 }
 
+// Azure OpenAI Service
+module openai 'modules/openai.bicep' = {
+  scope: rg
+  name: 'openai-deployment'
+  params: {
+    location: location
+    baseName: baseName
+    environmentName: environmentName
+    tags: tags
+    // Assign Cognitive Services OpenAI User role to managed identity for Entra ID auth
+    openAIUserPrincipalId: containerAppsIdentity.outputs.principalId
+  }
+}
+
 // Grant Cosmos DB data plane roles to the managed identity
 module cosmosManagedIdentityRoles 'modules/cosmos-roles.bicep' = if (useCosmosManagedIdentity) {
   scope: rg
@@ -143,7 +145,6 @@ module application 'modules/application.bicep' = {
     containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
     containerRegistryName: acr.outputs.registryName
     azureOpenAIEndpoint: openai.outputs.endpoint
-    azureOpenAIKey: openai.outputs.key
     azureOpenAIDeploymentName: openai.outputs.chatDeploymentName
     azureOpenAIEmbeddingDeploymentName: openai.outputs.embeddingDeploymentName
     mcpServiceUrl: mcpService.outputs.serviceUrl

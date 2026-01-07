@@ -5,7 +5,7 @@ resource "azurerm_role_assignment" "kv_secrets_camcp" {
   principal_id         = azurerm_user_assigned_identity.mcp.principal_id
 }
 
-# User Assigned Managed Identity for Backend Container App
+# User Assigned Managed Identity for MCP Container App
 resource "azurerm_user_assigned_identity" "mcp" {
   name                = "uami-mcp-${var.iteration}"
   resource_group_name = azurerm_resource_group.rg.name
@@ -24,7 +24,7 @@ resource "azurerm_container_app" "mcp" {
   }
 
   ingress {
-    target_port      = 8000
+    target_port      = var.mcp_target_port
     external_enabled = true
     transport        = "http"
     traffic_weight {
@@ -33,6 +33,15 @@ resource "azurerm_container_app" "mcp" {
     }
   }
 
+  # Cosmos DB key secret (only when not using managed identity)
+  dynamic "secret" {
+    for_each = var.use_cosmos_managed_identity ? [] : [1]
+    content {
+      name                = "cosmosdb-key"
+      identity            = azurerm_user_assigned_identity.mcp.id
+      key_vault_secret_id = azurerm_key_vault_secret.cosmos_primary_key[0].versionless_id
+    }
+  }
 
   template {
     min_replicas = 1
@@ -44,14 +53,57 @@ resource "azurerm_container_app" "mcp" {
       cpu    = 0.5
       memory = "1Gi"
 
+      # ========== Cosmos DB Configuration ==========
       env {
-        name  = "DISABLE_AUTH"
-        value = "true"
+        name  = "COSMOS_ENDPOINT"
+        value = azurerm_cosmosdb_account.main.endpoint
       }
 
       env {
-        name  = "DB_PATH"
-        value = "data/contoso.db"
+        name  = "COSMOS_DB_NAME"
+        value = local.cosmos_database_name
+      }
+
+      env {
+        name  = "COSMOS_CONTAINER_NAME"
+        value = local.agent_state_container_name
+      }
+
+      env {
+        name  = "COSMOS_USE_MANAGED_IDENTITY"
+        value = tostring(var.use_cosmos_managed_identity)
+      }
+
+      # Cosmos DB key (only when not using managed identity)
+      dynamic "env" {
+        for_each = var.use_cosmos_managed_identity ? [] : [1]
+        content {
+          name        = "COSMOSDB_KEY"
+          secret_name = "cosmosdb-key"
+        }
+      }
+
+      # Managed Identity Client ID (for Cosmos DB access)
+      dynamic "env" {
+        for_each = var.use_cosmos_managed_identity ? [1] : []
+        content {
+          name  = "AZURE_CLIENT_ID"
+          value = azurerm_user_assigned_identity.mcp.client_id
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.use_cosmos_managed_identity ? [1] : []
+        content {
+          name  = "MANAGED_IDENTITY_CLIENT_ID"
+          value = azurerm_user_assigned_identity.mcp.client_id
+        }
+      }
+
+      # ========== Authentication ==========
+      env {
+        name  = "DISABLE_AUTH"
+        value = tostring(var.disable_auth)
       }
     }
 
@@ -62,6 +114,8 @@ resource "azurerm_container_app" "mcp" {
   }
 
   depends_on = [
-    azurerm_role_assignment.kv_secrets_camcp
+    azurerm_role_assignment.kv_secrets_camcp,
+    azurerm_cosmosdb_sql_role_assignment.mcp_data_owner,
+    azurerm_cosmosdb_sql_role_assignment.mcp_data_contributor
   ]
 }
