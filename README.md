@@ -84,22 +84,7 @@ Welcome to the official repository for the Microsoft AI Agentic Workshop! This r
 
 ## Deploy to Azure
 
-Deploy the complete solution to Azure with infrastructure as code:
-
-**🚀 Quick Deploy with Azure Developer CLI (Recommended):**
-```bash
-azd auth login
-azd up
-```
-
-**Alternative Options:**
-- **PowerShell Script:** `cd infra && ./deploy.ps1 -Environment dev`
-- **Manual Bicep:** `az deployment sub create --template-file infra/main.bicep`
-
-📚 **Deployment Guides:**
-- [Azure Developer CLI (azd) Guide](./AZD_DEPLOYMENT.md) - Single-command deployment
-- [Complete Azure Deployment Guide](./DEPLOYMENT.md) - All deployment methods
-- [Infrastructure Documentation](./infra/README.md) - Bicep templates and architecture
+- [Complete Azure Deployment Guide](./infra/README.md) - All deployment methods
   
 ---  
   

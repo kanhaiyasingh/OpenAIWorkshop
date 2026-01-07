@@ -41,22 +41,6 @@ output "openai_deployment_name" {
   value       = var.create_openai_deployment ? azurerm_cognitive_deployment.gpt[0].name : var.openai_deployment_name
 }
 
-# Key Vault
-output "key_vault_name" {
-  description = "Name of the Key Vault"
-  value       = azurerm_key_vault.main.name
-}
-
-output "key_vault_uri" {
-  description = "URI of the Key Vault"
-  value       = azurerm_key_vault.main.vault_uri
-}
-
-output "key_vault_id" {
-  description = "ID of the Key Vault"
-  value       = azurerm_key_vault.main.id
-}
-
 output "mcp_aca_url" {
   description = "URL of the mcp container app"
   value       = "https://${azurerm_container_app.mcp.ingress[0].fqdn}"

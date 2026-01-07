@@ -9,7 +9,6 @@ locals {
   ai_hub_subdomain = lower(local.ai_hub_name)  # Custom subdomain must be lowercase
   model_endpoint = "https://${local.ai_hub_subdomain}.openai.azure.com/openai/v1/chat/completions"
   openai_endpoint = "https://${local.ai_hub_subdomain}.openai.azure.com"
-  key_vault_name       = "kv-${substr(local.name_prefix, 0, 14)}-${substr(var.iteration, -2, -1)}"
   web_app_name_prefix  = "${local.name_prefix}-${var.iteration}"
 
   # Merge user-provided tags with default tags
@@ -37,7 +36,7 @@ resource "azurerm_ai_services" "ai_hub" {
   location                           = "East US 2"
   name                               = local.ai_hub_name
   outbound_network_access_restricted = false
-  public_network_access              = "Enabled"
+  public_network_access              = var.enable_private_endpoint ? "Disabled" : "Enabled"
   resource_group_name                = azurerm_resource_group.rg.name
   sku_name                           = "S0"
   tags                               = local.common_tags
@@ -48,7 +47,7 @@ resource "azurerm_ai_services" "ai_hub" {
   }
 
   network_acls {
-    default_action = "Allow"
+    default_action = var.enable_private_endpoint ? "Deny" : "Allow"
     ip_rules       = []
   }
 
@@ -57,36 +56,4 @@ resource "azurerm_ai_services" "ai_hub" {
   }
 }
 
-resource "azurerm_key_vault" "main" {
-  name                       = local.key_vault_name
-  location                   = var.location
-  resource_group_name        = azurerm_resource_group.rg.name
-  tenant_id                  = data.azurerm_client_config.current.tenant_id
-  sku_name                   = "standard"
-  soft_delete_retention_days = 7
-  purge_protection_enabled   = false
 
-  # Enable RBAC authorization (recommended over access policies)
-  rbac_authorization_enabled = true
-
-  # Network settings
-  public_network_access_enabled = true
-
-  network_acls {
-    bypass         = "AzureServices"
-    default_action = "Allow"
-  }
-
-  tags = local.common_tags
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-# Key Vault Role Assignment - Current User (Key Vault Administrator)
-resource "azurerm_role_assignment" "kv_admin_current_user" {
-  scope                = azurerm_key_vault.main.id
-  role_definition_name = "Key Vault Administrator"
-  principal_id         = data.azurerm_client_config.current.object_id
-}

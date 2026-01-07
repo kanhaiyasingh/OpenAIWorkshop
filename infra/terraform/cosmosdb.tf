@@ -97,12 +97,4 @@ resource "azurerm_cosmosdb_sql_container" "agent_state" {
   partition_key_version = 2
 }
 
-# Store Cosmos DB key in Key Vault
-resource "azurerm_key_vault_secret" "cosmos_primary_key" {
-  count        = var.use_cosmos_managed_identity ? 0 : 1
-  name         = "COSMOS-PRIMARY-KEY"
-  value        = azurerm_cosmosdb_account.main.primary_key
-  key_vault_id = azurerm_key_vault.main.id
 
-  depends_on = [azurerm_role_assignment.kv_admin_current_user]
-}

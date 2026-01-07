@@ -23,6 +23,12 @@ param tags object = {
 @description('Enable user-assigned managed identity for Container Apps to access Cosmos DB without keys')
 param useCosmosManagedIdentity bool = true
 
+@description('Enable VNet integration and networking resources')
+param enableNetworking bool = false
+
+@description('Enable private endpoints for Azure OpenAI and Cosmos DB')
+param enablePrivateEndpoints bool = false
+
 // Resource Group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: '${baseName}-${environmentName}-rg'
@@ -66,6 +72,24 @@ module logAnalytics 'modules/log-analytics.bicep' = {
   }
 }
 
+// Networking (VNet, Subnets, Private DNS Zones, Private Endpoints)
+// Always deploy when networking is enabled, module handles conditional resources internally
+module network 'modules/network.bicep' = {
+  scope: rg
+  name: 'network-deployment'
+  params: {
+    location: location
+    baseName: baseName
+    environmentName: environmentName
+    tags: tags
+    containerAppsSubnetPrefix: '10.10.0.0/23'
+    privateEndpointSubnetPrefix: '10.10.2.0/24'
+    enablePrivateEndpoints: enablePrivateEndpoints
+    cosmosDbAccountId: cosmosdb.outputs.accountId
+    openAIAccountId: openai.outputs.resourceId
+  }
+}
+
 // Container Apps Environment
 module containerAppsEnv 'modules/container-apps-environment.bicep' = {
   scope: rg
@@ -76,6 +100,8 @@ module containerAppsEnv 'modules/container-apps-environment.bicep' = {
     environmentName: environmentName
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
     tags: tags
+    // Add VNet integration when networking is enabled
+    infrastructureSubnetId: enableNetworking ? network.outputs.containerAppsSubnetId : ''
   }
 }
 
@@ -101,6 +127,8 @@ module openai 'modules/openai.bicep' = {
     tags: tags
     // Assign Cognitive Services OpenAI User role to managed identity for Entra ID auth
     openAIUserPrincipalId: containerAppsIdentity.outputs.principalId
+    // Enable private endpoint mode (disables public network access)
+    enablePrivateEndpoint: enablePrivateEndpoints
   }
 }
 

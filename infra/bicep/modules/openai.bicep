@@ -10,6 +10,9 @@ param sku string = 'S0'
 @description('Principal ID to assign Cognitive Services OpenAI User role (for managed identity auth)')
 param openAIUserPrincipalId string = ''
 
+@description('Enable private endpoint (disables public network access)')
+param enablePrivateEndpoint bool = false
+
 @description('Model deployments to create')
 param deployments array = [
   {
@@ -52,9 +55,9 @@ resource openAI 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   }
   properties: {
     customSubDomainName: openAIName
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: enablePrivateEndpoint ? 'Disabled' : 'Enabled'
     networkAcls: {
-      defaultAction: 'Allow'
+      defaultAction: enablePrivateEndpoint ? 'Deny' : 'Allow'
     }
   }
   tags: tags
@@ -85,5 +88,6 @@ resource openAIUserRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-
 
 output endpoint string = openAI.properties.endpoint
 output name string = openAI.name
+output resourceId string = openAI.id
 output chatDeploymentName string = deployments[0].name
 output embeddingDeploymentName string = deployments[1].name

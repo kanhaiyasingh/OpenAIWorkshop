@@ -1,10 +1,3 @@
-# Key Vault Role Assignment - MCP App (Key Vault Secrets User)
-resource "azurerm_role_assignment" "kv_secrets_camcp" {
-  scope                = azurerm_key_vault.main.id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.mcp.principal_id
-}
-
 # User Assigned Managed Identity for MCP Container App
 resource "azurerm_user_assigned_identity" "mcp" {
   name                = "uami-mcp-${var.iteration}"
@@ -25,7 +18,7 @@ resource "azurerm_container_app" "mcp" {
 
   ingress {
     target_port      = var.mcp_target_port
-    external_enabled = true
+    external_enabled = var.mcp_internal_only ? false : true
     transport        = "http"
     traffic_weight {
       percentage      = 100
@@ -120,7 +113,6 @@ resource "azurerm_container_app" "mcp" {
   }
 
   depends_on = [
-    azurerm_role_assignment.kv_secrets_camcp,
     azurerm_role_assignment.acr_pull_mcp,
     azurerm_cosmosdb_sql_role_assignment.mcp_data_owner,
     azurerm_cosmosdb_sql_role_assignment.mcp_data_contributor

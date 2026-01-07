@@ -235,6 +235,12 @@ variable "openai_embedding_model_version" {
 # Container App Configuration
 # ============================================================================
 
+variable "mcp_internal_only" {
+  description = "Make MCP service internal-only (not exposed to public internet). When true, only Container Apps in the same environment can access it."
+  type        = bool
+  default     = false
+}
+
 variable "backend_target_port" {
   description = "Target port for the backend container app"
   type        = number

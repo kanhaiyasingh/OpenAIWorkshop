@@ -77,3 +77,52 @@ resource "azurerm_private_endpoint" "cosmos" {
 
   tags = local.common_tags
 }
+
+# ============================================================================
+# Private DNS Zone for Azure OpenAI
+# ============================================================================
+
+resource "azurerm_private_dns_zone" "openai" {
+  count               = var.enable_private_endpoint ? 1 : 0
+  name                = "privatelink.openai.azure.com"
+  resource_group_name = azurerm_resource_group.rg.name
+
+  tags = local.common_tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "openai" {
+  count                 = var.enable_private_endpoint ? 1 : 0
+  name                  = "openai-dns-link"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.openai[0].name
+  virtual_network_id    = azurerm_virtual_network.vnet[0].id
+  registration_enabled  = false
+
+  tags = local.common_tags
+}
+
+# ============================================================================
+# Private Endpoint for Azure OpenAI
+# ============================================================================
+
+resource "azurerm_private_endpoint" "openai" {
+  count               = var.enable_private_endpoint ? 1 : 0
+  name                = "pe-openai-${local.web_app_name_prefix}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = azurerm_subnet.private_endpoints[0].id
+
+  private_service_connection {
+    name                           = "openai-privateserviceconnection"
+    private_connection_resource_id = azurerm_ai_services.ai_hub.id
+    is_manual_connection           = false
+    subresource_names              = ["account"]
+  }
+
+  private_dns_zone_group {
+    name                 = "openai-dns-zone-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.openai[0].id]
+  }
+
+  tags = local.common_tags
+}

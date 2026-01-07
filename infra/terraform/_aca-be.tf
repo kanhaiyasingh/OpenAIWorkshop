@@ -5,13 +5,6 @@ resource "azurerm_user_assigned_identity" "backend" {
   location            = azurerm_resource_group.rg.location
 }
 
-# Key Vault Role Assignment - Backend App (Key Vault Secrets User)
-resource "azurerm_role_assignment" "kv_secrets_cabe" {
-  scope                = azurerm_key_vault.main.id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.backend.principal_id
-}
-
 # Cognitive Services OpenAI User Role Assignment - Backend App
 # Required for Entra ID / managed identity authentication to Azure OpenAI
 # Allows inference API calls (chat completions, embeddings) without API keys
@@ -160,7 +153,8 @@ resource "azurerm_container_app" "backend" {
       # ========== MCP and Agent Configuration ==========
       env {
         name  = "MCP_SERVER_URI"
-        value = "https://${azurerm_container_app.mcp.ingress[0].fqdn}/mcp"
+        # When MCP is internal-only, use internal FQDN; otherwise use public FQDN
+        value = var.mcp_internal_only ? "http://${azurerm_container_app.mcp.name}.internal.${azurerm_container_app_environment.cae.default_domain}/mcp" : "https://${azurerm_container_app.mcp.ingress[0].fqdn}/mcp"
       }
 
       env {
@@ -207,7 +201,6 @@ resource "azurerm_container_app" "backend" {
   }
 
   depends_on = [
-    azurerm_role_assignment.kv_secrets_cabe,
     azurerm_role_assignment.openai_user_backend,
     azurerm_role_assignment.acr_pull_backend,
     azurerm_cosmosdb_sql_role_assignment.backend_data_owner,
