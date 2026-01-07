@@ -84,7 +84,7 @@ resource "azurerm_container_app" "backend" {
 
       env {
         name  = "AZURE_OPENAI_API_VERSION"
-        value = "2025-01-01-preview"
+        value = var.openai_model_version
       }
 
       env {
