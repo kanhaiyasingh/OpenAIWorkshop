@@ -20,6 +20,9 @@ resource "azurerm_container_app" "mcp" {
     target_port      = var.mcp_target_port
     external_enabled = var.mcp_internal_only ? false : true
     transport        = "http"
+    # Allow HTTP (non-TLS) connections for internal communication
+    # This is safe because the MCP service is internal-only (not exposed to internet)
+    allow_insecure_connections = var.mcp_internal_only ? true : false
     traffic_weight {
       percentage      = 100
       latest_revision = true

@@ -2,7 +2,7 @@
 # Aligned with Bicep modules/cosmosdb.bicep
 
 locals {
-  cosmos_db_name            = lower("${var.project_name}-${local.env}-cosmos")
+  cosmos_db_name            = lower("${var.project_name}-${local.env}-cosmos-${var.iteration}")
   cosmos_database_name      = "contoso"
   agent_state_container_name = "workshop_agent_state_store"
 }

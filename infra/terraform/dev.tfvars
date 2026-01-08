@@ -3,8 +3,8 @@ environment      = "dev"
 location         = "eastus2"
 project_name     = "OpenAIWorkshop"
 iteration        = "002"
-tenant_id        = "YOUR_TENANT_ID"
-subscription_id  = "YOUR_SUBSCRIPTION_ID"
+tenant_id        = "0fbe7234-45ea-498b-b7e4-1a8b2d3be4d9"
+subscription_id  = "840b5c5c-3f4a-459a-94fc-6bad2a969f9d"
 
 # Optional: Set to false if you want to use API keys (not recommended)
 use_cosmos_managed_identity = true

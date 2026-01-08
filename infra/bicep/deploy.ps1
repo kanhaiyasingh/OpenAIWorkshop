@@ -121,41 +121,23 @@ if (-not $SkipBuild) {
     Write-Host "`n[4/5] Skipping Application build (--SkipBuild)" -ForegroundColor Yellow
 }
 
-# Step 5: Update Container Apps to use new images
-Write-Host "`n[5/5] Updating Container Apps with new images..." -ForegroundColor Green
+# Step 5: Restart Container Apps to pull new images
+Write-Host "`n[5/5] Restarting Container Apps..." -ForegroundColor Green
 
-$McpServiceName = "$BaseName-mcp"
-$AppName = "$BaseName-app"
+$McpServiceName = "$BaseName-$Environment-mcp"
+$AppName = "$BaseName-$Environment-app"
 
-$ErrorActionPreference = 'Continue'
-
-Write-Host "Updating MCP Service: $McpServiceName" -ForegroundColor Gray
-az containerapp update `
+Write-Host "Restarting MCP Service: $McpServiceName" -ForegroundColor Gray
+az containerapp revision restart `
     --resource-group $ResourceGroupName `
     --name $McpServiceName `
-    --image "$AcrLoginServer/mcp-service:latest" `
-    --output none 2>$null
+    --revision latest
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  MCP Service update skipped (container app may not exist yet)" -ForegroundColor Yellow
-} else {
-    Write-Host "  MCP Service updated successfully" -ForegroundColor Green
-}
-
-Write-Host "Updating Application: $AppName" -ForegroundColor Gray
-az containerapp update `
+Write-Host "Restarting Application: $AppName" -ForegroundColor Gray
+az containerapp revision restart `
     --resource-group $ResourceGroupName `
     --name $AppName `
-    --image "$AcrLoginServer/workshop-app:latest" `
-    --output none 2>$null
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Application update skipped (container app may not exist yet)" -ForegroundColor Yellow
-} else {
-    Write-Host "  Application updated successfully" -ForegroundColor Green
-}
-
-$ErrorActionPreference = 'Stop'
+    --revision latest
 
 Write-Host "`n======================================" -ForegroundColor Cyan
 Write-Host "Deployment Complete!" -ForegroundColor Green
