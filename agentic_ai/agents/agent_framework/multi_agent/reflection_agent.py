@@ -282,3 +282,4 @@ class Agent(BaseAgent):
         self._setstate(await self._thread.serialize())
 
         return response
+
