@@ -2,7 +2,7 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext  # added
 from typing import Annotated, List, Optional, Dict, Any  
 from pydantic import BaseModel  
-import sqlite3, os, asyncio, logging, time  
+import os, asyncio, logging, time  
 from datetime import datetime  
 from dotenv import load_dotenv  
 from fastmcp.server.middleware import Middleware, MiddlewareContext 
@@ -18,7 +18,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.dependencies import get_http_request, get_access_token
 from fastmcp.utilities.logging import get_logger  
 
-# Import common tools
+# Import common tools (backend selected via USE_COSMOSDB env var)
 from contoso_tools import *
 
 logger = get_logger("auth.debug")  
