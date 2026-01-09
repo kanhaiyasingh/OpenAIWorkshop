@@ -35,7 +35,3 @@ private_endpoint_subnet_prefix = "10.10.2.0/24"
 # Set to true to make MCP service internal-only (not exposed to public internet)
 # The backend app will use internal URL to communicate with MCP
 mcp_internal_only = true
-
-# Data Seeding
-# Set to true to seed Cosmos DB with sample data after deployment
-seed_cosmos_data = true

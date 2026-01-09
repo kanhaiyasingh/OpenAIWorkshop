@@ -1,16 +1,17 @@
-"""Cosmos DB Backend for Contoso Customer Service
+"""Contoso Customer Service Utility Module - Cosmos DB Version
 
 Provides granular async functions for interacting with the Contoso
-customer database in Azure Cosmos DB. Designed for production deployments
-with Azure infrastructure.
+customer database in Azure Cosmos DB. Designed to be used by both MCP 
+tools and AutoGen agents.
 """
 
 import os
+import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from dotenv import load_dotenv
 from azure.cosmos import CosmosClient, ContainerProxy, exceptions
-from azure.identity import DefaultAzureCredential, AzureCliCredential
+from azure.identity import AzureCliCredential
 
 # Load environment variables
 load_dotenv()
@@ -41,16 +42,11 @@ _database = None
 
 
 def get_cosmos_client() -> CosmosClient:
-    """Get or create Cosmos DB client using Azure credentials."""
+    """Get or create Cosmos DB client using Azure CLI credentials."""
     global _cosmos_client
     if _cosmos_client is None:
-        # Try DefaultAzureCredential first (works in Azure), fall back to CLI
-        try:
-            credential = DefaultAzureCredential()
-            _cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        except Exception:
-            credential = AzureCliCredential()
-            _cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        credential = AzureCliCredential()
+        _cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
     return _cosmos_client
 
 

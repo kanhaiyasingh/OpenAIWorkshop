@@ -1,12 +1,5 @@
 # Terraform Infrastructure Deployment Script for OpenAI Workshop
 # This script deploys infrastructure via Terraform, builds Docker images, pushes to ACR, and updates Container Apps
-#
-# Usage:
-#   .\deploy.ps1                           # Full deployment with defaults
-#   .\deploy.ps1 -PlanOnly                 # Only plan, don't apply
-#   .\deploy.ps1 -InfraOnly                # Deploy infra, skip container builds
-#   .\deploy.ps1 -SkipBuild                # Deploy but skip container builds
-#   .\deploy.ps1 -SeedCosmosData           # Seed Cosmos DB with sample data after deployment
 
 param(
     [Parameter(Mandatory=$false)]
@@ -20,12 +13,6 @@ param(
     [string]$ProjectName = 'OpenAIWorkshop',
     
     [Parameter(Mandatory=$false)]
-    [string]$Iteration = '002',
-    
-    [Parameter(Mandatory=$false)]
-    [string]$SubscriptionId = '',
-    
-    [Parameter(Mandatory=$false)]
     [switch]$SkipBuild,
     
     [Parameter(Mandatory=$false)]
@@ -35,45 +22,36 @@ param(
     [switch]$PlanOnly,
 
     [Parameter(Mandatory=$false)]
-    [switch]$SeedCosmosData
+    [switch]$RemoteBackend
 )
 
-$ErrorActionPreference = 'Stop'
-
 Write-Host "======================================" -ForegroundColor Cyan
-Write-Host "Azure OpenAI Workshop - Local Deployment" -ForegroundColor Cyan
+Write-Host "Azure OpenAI Workshop - Terraform Deployment" -ForegroundColor Cyan
 Write-Host "Environment: $Environment" -ForegroundColor Cyan
 Write-Host "Location: $Location" -ForegroundColor Cyan
-Write-Host "Iteration: $Iteration" -ForegroundColor Cyan
-Write-Host "======================================" -ForegroundColor Cyan
 
-# Verify Azure CLI is logged in
-$account = az account show 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Error "Not logged in to Azure CLI. Please run: az login"
+Write-Host "`n[Pre] Using existing Terraform variables to get iteration value..." -ForegroundColor Cyan
+$tfvarsPath = "$PSScriptRoot\$Environment.tfvars"
+if (-not (Test-Path $tfvarsPath)) {
+    Write-Error "tfvars file not found: $tfvarsPath"
     exit 1
 }
 
-# Use provided SubscriptionId or get from current Azure CLI context
-if ([string]::IsNullOrEmpty($SubscriptionId)) {
-    $SubscriptionId = $account.id
-    Write-Host "`nUsing current subscription from Azure CLI: $SubscriptionId" -ForegroundColor Yellow
-} else {
-    Write-Host "`nUsing provided Subscription: $SubscriptionId" -ForegroundColor Yellow
-    # Set correct subscription if explicitly provided
-    az account set --subscription $SubscriptionId
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to set subscription. Check if you have access to: $SubscriptionId"
-        exit 1
-    }
+$Iteration = ((get-content $tfvarsPath | select-string iteration).Line -split "=")[1].Trim().Trim('"')
+if ([String]::IsNullOrEmpty($Iteration)) {
+    Write-Error "Iteration must be defined in tfvars!"
+    exit 1
 }
 
-# Set ARM_SUBSCRIPTION_ID for Terraform
-$env:ARM_SUBSCRIPTION_ID = $SubscriptionId
+Write-Host "Iteration: $Iteration" -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
 
-$TenantId = $account.tenantId
+# Get current Azure context
+$SubscriptionId = (az account show --query id -o tsv)
+$TenantId = (az account show --query tenantId -o tsv)
+
+Write-Host "`nUsing Subscription: $SubscriptionId" -ForegroundColor Yellow
 Write-Host "Using Tenant: $TenantId" -ForegroundColor Yellow
-Write-Host "Logged in as: $($account.user.name)" -ForegroundColor Yellow
 
 # Variables derived from Terraform naming conventions
 $ResourceGroupName = "rg-$ProjectName-$Environment-$Iteration"
@@ -85,18 +63,26 @@ Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
 Write-Host "  MCP Container App: $McpServiceName" -ForegroundColor Gray
 Write-Host "  Backend Container App: $AppName" -ForegroundColor Gray
 
-# Step 1: Initialize Terraform with LOCAL backend
-Write-Host "`n[1/6] Initializing Terraform (local state)..." -ForegroundColor Green
+# Step 1: Initialize Terraform
+Write-Host "`n[1/6] Initializing Terraform..." -ForegroundColor Green
 Push-Location $PSScriptRoot
 try {
-    # Ensure we're using local backend (not remote)
-    if (Test-Path -Path providers.tf.local) {
-        Move-Item providers.tf providers.tf.remote -Force
-        Move-Item providers.tf.local providers.tf -Force
-        Write-Host "  Switched to local backend" -ForegroundColor Gray
+    # If remote backend is specified, use a remote backend. We will ensure that there is a properly configured backend in providers.
+    # If the remote backend is not specified, we default with this interactive script to local state so we move the default config
+    #   to a different file.
+    if ($RemoteBackend) {
+        if (test-path -path providers.tf.remote) {
+            move-item providers.tf providers.tf.local
+            move-item providers.tf.remote providers.tf
+        }
+        terraform init -upgrade -backend-config="resource_group_name=$env:TFSTATE_RG" -backend-config="key=$env:TFSTATE_KEY" -backend-config="storage_account_name=$env:TFSTATE_ACCOUNT" -backend-config="container_name=$env:TFSTATE_CONTAINER"
+    } else {
+        if (test-path -path providers.tf.local) {
+            move-item providers.tf providers.tf.remote
+            move-item providers.tf.local providers.tf
+        }
+        terraform init -upgrade
     }
-    
-    terraform init -upgrade
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Terraform init failed!"
         exit 1
@@ -249,67 +235,6 @@ if ($LASTEXITCODE -ne 0) {
 
 $ErrorActionPreference = 'Stop'
 
-# Optional: Seed Cosmos DB with sample data
-if ($SeedCosmosData) {
-    Write-Host "`n[7/7] Seeding Cosmos DB with sample data..." -ForegroundColor Green
-    
-    # Get Cosmos DB endpoint from Terraform output
-    Push-Location $PSScriptRoot
-    try {
-        $CosmosEndpoint = terraform output -raw cosmosdb_endpoint
-    }
-    finally {
-        Pop-Location
-    }
-    
-    # Update .env file in mcp directory with Cosmos DB settings
-    $mcpEnvPath = Join-Path $PSScriptRoot ".." ".." "mcp" ".env"
-    
-    # Create or update .env with required settings
-    $envContent = ""
-    if (Test-Path $mcpEnvPath) {
-        $envContent = Get-Content $mcpEnvPath -Raw
-    }
-    
-    # Update COSMOSDB_ENDPOINT
-    if ($envContent -match 'COSMOSDB_ENDPOINT=') {
-        $envContent = $envContent -replace 'COSMOSDB_ENDPOINT="[^"]*"', "COSMOSDB_ENDPOINT=`"$CosmosEndpoint`""
-    } else {
-        $envContent += "`nCOSMOSDB_ENDPOINT=`"$CosmosEndpoint`""
-    }
-    
-    # Update COSMOS_DATABASE_NAME
-    if ($envContent -match 'COSMOS_DATABASE_NAME=') {
-        $envContent = $envContent -replace 'COSMOS_DATABASE_NAME="[^"]*"', "COSMOS_DATABASE_NAME=`"contoso`""
-    } else {
-        $envContent += "`nCOSMOS_DATABASE_NAME=`"contoso`""
-    }
-    
-    $envContent | Set-Content $mcpEnvPath -NoNewline
-    Write-Host "  Updated MCP .env file with Cosmos DB settings" -ForegroundColor Gray
-    
-    # Run data population script
-    $dataScriptPath = Join-Path $PSScriptRoot ".." ".." "mcp" "data" "create_cosmos_db.py"
-    if (Test-Path $dataScriptPath) {
-        Write-Host "  Running data population script..." -ForegroundColor Gray
-        Push-Location (Split-Path $dataScriptPath -Parent)
-        try {
-            python create_cosmos_db.py
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Cosmos DB data seeded successfully" -ForegroundColor Green
-            } else {
-                Write-Host "  Data seeding failed (exit code: $LASTEXITCODE)" -ForegroundColor Yellow
-                Write-Host "  You can run it manually: cd mcp/data && python create_cosmos_db.py" -ForegroundColor Yellow
-            }
-        }
-        finally {
-            Pop-Location
-        }
-    } else {
-        Write-Host "  Data script not found at: $dataScriptPath" -ForegroundColor Yellow
-    }
-}
-
 Write-Host "`n======================================" -ForegroundColor Cyan
 Write-Host "Deployment Complete!" -ForegroundColor Green
 Write-Host "======================================" -ForegroundColor Cyan
@@ -319,9 +244,3 @@ Write-Host "`nMCP Service URL:" -ForegroundColor Yellow
 Write-Host "  $McpUrl" -ForegroundColor Cyan
 Write-Host "`nResource Group:" -ForegroundColor Yellow
 Write-Host "  $ResourceGroupName" -ForegroundColor Cyan
-
-if (-not $SeedCosmosData) {
-    Write-Host "`nTo seed Cosmos DB with sample data, run:" -ForegroundColor Yellow
-    Write-Host "  .\deploy.ps1 -SeedCosmosData" -ForegroundColor Gray
-    Write-Host "  OR manually: cd mcp/data && python create_cosmos_db.py" -ForegroundColor Gray
-}

@@ -4,8 +4,9 @@ metadata:
 
 infra:
   provider: bicep
-  path: infra/bicep
-  module: main
+  path: infra
+  module: main.azd
+  parameters: main.azd.bicepparam
 
 services:
   mcp:
@@ -22,3 +23,11 @@ services:
     docker:
       path: ./Dockerfile
       context: ../
+
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./infra/scripts/preprovision.ps1
+  postprovision:
+    shell: pwsh
+    run: ./infra/scripts/setup-aad.ps1

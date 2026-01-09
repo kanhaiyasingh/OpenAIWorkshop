@@ -81,6 +81,12 @@ resource "azurerm_container_app" "mcp" {
         value = local.cosmos_database_name
       }
 
+      # Agent state container (for agent persistence)
+      env {
+        name  = "COSMOS_DB_NAME"
+        value = local.cosmos_database_name
+      }
+
       env {
         name  = "COSMOS_CONTAINER_NAME"
         value = local.agent_state_container_name

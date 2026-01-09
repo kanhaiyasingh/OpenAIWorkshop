@@ -6,9 +6,8 @@ Complete guide for setting up and running the Contoso MCP (Model Context Protoco
 
 - [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
-- [Backend Selection](#backend-selection)
-- [SQLite Setup (Local Development)](#sqlite-setup-local-development)
-- [Cosmos DB Setup (Cloud Production)](#cosmos-db-setup-cloud-production)
+- [Option 1: SQLite (Local Development)](#option-1-sqlite-local-development)
+- [Option 2: Cosmos DB (Cloud Production)](#option-2-cosmos-db-cloud-production)
 - [Environment Configuration](#environment-configuration)
 - [Running the Service](#running-the-service)
 - [Testing](#testing)
@@ -18,9 +17,7 @@ Complete guide for setting up and running the Contoso MCP (Model Context Protoco
 
 ## Quick Start
 
-The MCP service uses a **unified architecture** with backend selection via the `USE_COSMOSDB` environment variable.
-
-**For local development (SQLite - default):**
+**For local development (SQLite):**
 ```bash
 cd mcp
 uv sync
@@ -29,11 +26,13 @@ uv run python mcp_service.py
 
 **For cloud/production (Cosmos DB):**
 ```bash
-cd mcp
-$env:USE_COSMOSDB = "true"  # PowerShell
-# or: export USE_COSMOSDB=true  # Bash
+cd mcp/data
+.\setup_cosmos.ps1        # Windows PowerShell
+# or
+./setup_cosmos.sh         # Linux/macOS
 
-uv run python mcp_service.py
+cd ..
+uv run python mcp_service_cosmos.py
 ```
 
 ---
@@ -52,29 +51,7 @@ uv run python mcp_service.py
 
 ---
 
-## Backend Selection
-
-The MCP service uses a unified `contoso_tools.py` module that automatically selects the appropriate backend based on environment variables:
-
-| Environment Variable | Value | Backend |
-|---------------------|-------|--------|
-| `USE_COSMOSDB` | `false` (default) | SQLite (`_backend_sqlite.py`) |
-| `USE_COSMOSDB` | `true` | Cosmos DB (`_backend_cosmos.py`) |
-
-Both backends provide identical APIs, so switching between them requires no code changes.
-
-### Architecture
-
-```
-mcp_service.py
-    └── contoso_tools.py (backend selector)
-            ├── _backend_sqlite.py  (USE_COSMOSDB=false)
-            └── _backend_cosmos.py  (USE_COSMOSDB=true)
-```
-
----
-
-## SQLite Setup (Local Development)
+## Option 1: SQLite (Local Development)
 
 Best for: Development, testing, learning, demos without Azure dependencies.
 
@@ -113,8 +90,7 @@ AZURE_OPENAI_API_KEY="your-api-key"
 AZURE_OPENAI_API_VERSION="2024-02-15-preview"
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT="text-embedding-ada-002"
 
-# Backend selection (SQLite is default)
-USE_COSMOSDB="false"
+# Database
 DB_PATH="data/contoso.db"
 
 # Authentication (disable for local dev)
@@ -142,7 +118,7 @@ The service will start on `http://localhost:8000/mcp`
 
 ---
 
-## Cosmos DB Setup (Cloud Production)
+## Option 2: Cosmos DB (Cloud Production)
 
 Best for: Production deployments, cloud-scale operations, multi-region scenarios.
 
@@ -263,7 +239,6 @@ az cosmosdb show \
 
 Add to your `.env`:
 ```ini
-USE_COSMOSDB="true"
 COSMOSDB_ENDPOINT="https://mcp-contoso-cosmos.documents.azure.com:443/"
 COSMOS_DATABASE_NAME="contoso"
 ```
@@ -309,16 +284,11 @@ You should see 12 containers:
 - ServiceIncidents
 - KnowledgeDocuments
 
-### 4. Run with Cosmos DB Backend
+### 4. Run Cosmos DB Service
 
 ```bash
 cd mcp
-
-# Set environment variable (if not in .env)
-$env:USE_COSMOSDB = "true"  # PowerShell
-# or: export USE_COSMOSDB=true  # Bash
-
-uv run python mcp_service.py
+uv run python mcp_service_cosmos.py
 ```
 
 **Key Features:**
@@ -331,21 +301,8 @@ uv run python mcp_service.py
 **Cosmos DB-Specific Details:**
 - **Partition strategy**: Each container has optimized partition keys
 - **Vector indexing**: KnowledgeDocuments uses 1536-dimension embeddings
-- **Authentication**: Azure CLI credentials or Managed Identity
+- **Authentication**: Azure CLI credentials (AzureCliCredential)
 - **Cross-partition queries**: Enabled for flexibility
-
-### 5. Automatic Data Seeding (Container Apps)
-
-When deployed to Azure Container Apps, the MCP service can automatically seed data on startup using the `SEED_ON_STARTUP` environment variable:
-
-```ini
-# Container Apps environment variables
-USE_COSMOSDB="true"
-SEED_ON_STARTUP="true"
-COSMOS_USE_MANAGED_IDENTITY="true"
-```
-
-This is configured automatically by Terraform when `seed_cosmos_data = true` in your tfvars.
 
 ---
 
@@ -355,7 +312,7 @@ This is configured automatically by Terraform when `seed_cosmos_data = true` in 
 
 ```ini
 # ============================================================================
-# Azure OpenAI (Required for both backends)
+# Azure OpenAI (Required for both SQLite and Cosmos DB)
 # ============================================================================
 AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
 AZURE_OPENAI_API_KEY="your-api-key"
@@ -365,29 +322,14 @@ AZURE_OPENAI_EMBEDDING_DEPLOYMENT="text-embedding-ada-002"
 OPENAI_MODEL_NAME="gpt-4"
 
 # ============================================================================
-# Backend Selection
+# Database Configuration
 # ============================================================================
-# Set to "true" for Cosmos DB, "false" for SQLite (default)
-USE_COSMOSDB="false"
-
-# ============================================================================
-# SQLite Configuration (when USE_COSMOSDB=false)
-# ============================================================================
+# For SQLite:
 DB_PATH="data/contoso.db"
 
-# ============================================================================
-# Cosmos DB Configuration (when USE_COSMOSDB=true)
-# ============================================================================
+# For Cosmos DB (add these after running setup script):
 COSMOSDB_ENDPOINT="https://mcp-contoso-cosmos.documents.azure.com:443/"
 COSMOS_DATABASE_NAME="contoso"
-COSMOS_CONTAINER_NAME="contoso"
-
-# For Managed Identity (Container Apps deployment):
-COSMOS_USE_MANAGED_IDENTITY="true"
-MANAGED_IDENTITY_CLIENT_ID="your-managed-identity-client-id"
-
-# For automatic seeding on startup (Container Apps):
-SEED_ON_STARTUP="true"
 
 # ============================================================================
 # Authentication & Authorization
@@ -402,40 +344,41 @@ DISABLE_AUTH="true"
 # PUBLIC_BASE_URL="https://your-domain.com"
 # SECURITY_ROLE="security"
 # QUERY_ROLE="query"
+
+# ============================================================================
+# Optional: MCP Server Configuration
+# ============================================================================
+# MCP_SERVER_URI="http://localhost:8000/mcp"
 ```
 
 ### Environment Variables Reference
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `USE_COSMOSDB` | No | `false` | Backend selection: `true` for Cosmos DB |
 | `AZURE_OPENAI_ENDPOINT` | Yes | - | Azure OpenAI resource endpoint |
 | `AZURE_OPENAI_API_KEY` | Yes | - | Azure OpenAI API key |
 | `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | Yes | - | Embedding model deployment name |
-| `DB_PATH` | SQLite | `data/contoso.db` | Path to SQLite database |
-| `COSMOSDB_ENDPOINT` | Cosmos | - | Cosmos DB account endpoint |
-| `COSMOS_DATABASE_NAME` | Cosmos | `contoso` | Cosmos DB database name |
-| `COSMOS_USE_MANAGED_IDENTITY` | Cosmos | `false` | Use Managed Identity for auth |
-| `SEED_ON_STARTUP` | Cosmos | `false` | Seed data on service startup |
+| `DB_PATH` | SQLite only | `data/contoso.db` | Path to SQLite database |
+| `COSMOSDB_ENDPOINT` | Cosmos only | - | Cosmos DB account endpoint |
+| `COSMOS_DATABASE_NAME` | Cosmos only | `contoso` | Cosmos DB database name |
 | `DISABLE_AUTH` | No | `false` | Set to `true` for local dev |
 
 ---
 
 ## Running the Service
 
-### Basic Usage
-
-The same `mcp_service.py` handles both backends - just set `USE_COSMOSDB` appropriately:
+### SQLite Version
 
 ```bash
 cd mcp
-
-# SQLite backend (default)
 uv run python mcp_service.py
+```
 
-# Cosmos DB backend
-$env:USE_COSMOSDB = "true"; uv run python mcp_service.py  # PowerShell
-# or: USE_COSMOSDB=true uv run python mcp_service.py      # Bash
+### Cosmos DB Version
+
+```bash
+cd mcp
+uv run python mcp_service_cosmos.py
 ```
 
 ### Using uv with OneDrive
@@ -445,7 +388,7 @@ If your project is in OneDrive, set link mode to avoid hardlink errors:
 ```bash
 # PowerShell
 $env:UV_LINK_MODE="copy"
-uv run python mcp_service.py
+uv run python mcp_service_cosmos.py
 
 # Or create uv.toml in the mcp directory:
 echo "link-mode = \"copy\"" > uv.toml
@@ -614,22 +557,15 @@ uv sync --reinstall
 **Enable verbose logging:**
 
 ```python
-# Add to top of mcp_service.py
+# Add to top of mcp_service.py or mcp_service_cosmos.py
 import logging
 logging.basicConfig(level=logging.DEBUG)
-```
-
-**Check backend selection:**
-
-```python
-from contoso_tools import _BACKEND
-print(f"Using backend: {_BACKEND}")  # "sqlite" or "cosmosdb"
 ```
 
 **Check Cosmos DB connectivity:**
 
 ```python
-from _backend_cosmos import get_cosmos_client, get_database
+from contoso_tools_cosmos import get_cosmos_client, get_database
 client = get_cosmos_client()
 db = get_database()
 print(f"Connected to: {db.id}")
@@ -711,28 +647,26 @@ See [README.md](README.md) for advanced topics including:
 mcp/
 ├── SETUP.md                    # This file
 ├── README.md                   # Architecture and design docs
-├── pyproject.toml              # Python dependencies
-├── uv.lock                     # Locked dependencies
-├── uv.toml                     # UV configuration (link-mode)
-├── .env                        # Environment variables (create this)
+├── README_COSMOS.md            # Cosmos DB implementation details
+├── pyproject.toml             # Python dependencies
+├── uv.lock                    # Locked dependencies
+├── .env                       # Environment variables (create this)
 │
-├── mcp_service.py              # Unified MCP service (both backends)
-├── mcp_service_agentic.py      # Agentic MCP service variant
-├── contoso_tools.py            # Backend selector module
-├── _backend_sqlite.py          # SQLite data access layer
-├── _backend_cosmos.py          # Cosmos DB data access layer
-├── data_seeding.py             # Cosmos DB data seeding module
+├── mcp_service.py             # SQLite-based service
+├── mcp_service_cosmos.py      # Cosmos DB-based service
+├── contoso_tools.py           # SQLite data access layer
+├── contoso_tools_cosmos.py    # Cosmos DB data access layer
 │
 └── data/
-    ├── setup_cosmos.ps1        # Automated Cosmos DB setup (PowerShell)
-    ├── setup_cosmos.sh         # Automated Cosmos DB setup (Bash)
-    ├── cosmosdb.bicep          # Cosmos DB infrastructure template
-    ├── cosmosdb-rbac.bicep     # RBAC role assignment template
-    ├── create_db.py            # SQLite database creation
-    ├── create_cosmos_db.py     # Cosmos DB data population
-    ├── contoso.db              # SQLite database (auto-generated)
-    ├── customer_scenarios.md   # Test scenario definitions
-    └── kb.json                 # Knowledge base articles
+    ├── setup_cosmos.ps1       # Automated Cosmos DB setup (PowerShell)
+    ├── setup_cosmos.sh        # Automated Cosmos DB setup (Bash)
+    ├── cosmosdb.bicep         # Cosmos DB infrastructure template
+    ├── cosmosdb-rbac.bicep    # RBAC role assignment template
+    ├── create_db.py           # SQLite database creation
+    ├── create_cosmos_db.py    # Cosmos DB data population
+    ├── contoso.db            # SQLite database (auto-generated)
+    ├── customer_scenarios.md  # Test scenario definitions
+    └── kb.json               # Knowledge base articles
 ```
 
 ### Command Cheat Sheet
@@ -741,21 +675,20 @@ mcp/
 # Install dependencies
 cd mcp && uv sync
 
-# Run with SQLite backend (default)
+# Run SQLite version
 uv run python mcp_service.py
 
-# Run with Cosmos DB backend
-$env:USE_COSMOSDB = "true"; uv run python mcp_service.py  # PowerShell
-USE_COSMOSDB=true uv run python mcp_service.py            # Bash
+# Run Cosmos DB version
+uv run python mcp_service_cosmos.py
 
 # Setup Cosmos DB (automated)
 cd data && .\setup_cosmos.ps1
 
 # Recreate SQLite database
-uv run python data/create_db.py
+python data/create_db.py
 
 # Populate Cosmos DB
-uv run python data/create_cosmos_db.py
+python data/create_cosmos_db.py
 
 # Check Azure login
 az login && az account show
@@ -766,4 +699,4 @@ az group delete --name mcp-demo-rg --yes
 
 ---
 
-**Ready to start?** Choose SQLite for local development or Cosmos DB for production, then run the same `mcp_service.py`! 🚀
+**Ready to start?** Choose your setup option above and follow the steps! 🚀
