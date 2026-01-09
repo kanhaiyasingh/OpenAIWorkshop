@@ -165,6 +165,7 @@ module mcpService 'modules/mcp-service.bicep' = {
     mcpInternalOnly: mcpInternalOnly
     containerAppsEnvironmentDomain: containerAppsEnv.outputs.defaultDomain
     tags: tags
+    usePlaceholderImage: true  // Use placeholder for initial deployment, update-containers.yml sets real image
   }
 }
 
@@ -175,6 +176,7 @@ module application 'modules/application.bicep' = {
   params: {
     location: location
     baseName: baseName
+    environmentName: environmentName
     containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
     containerRegistryName: acr.outputs.registryName
     azureOpenAIEndpoint: openai.outputs.endpoint
@@ -189,6 +191,7 @@ module application 'modules/application.bicep' = {
     userAssignedIdentityResourceId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.resourceId : ''
     userAssignedIdentityClientId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.clientId : ''
     tags: tags
+    usePlaceholderImage: true  // Use placeholder for initial deployment, update-containers.yml sets real image
   }
 }
 
