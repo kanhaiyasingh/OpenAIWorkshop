@@ -13,9 +13,6 @@ param(
     [string]$ProjectName = 'OpenAIWorkshop',
     
     [Parameter(Mandatory=$false)]
-    [string]$Iteration = '002',
-    
-    [Parameter(Mandatory=$false)]
     [switch]$SkipBuild,
     
     [Parameter(Mandatory=$false)]
@@ -28,12 +25,24 @@ param(
     [switch]$RemoteBackend
 )
 
-$ErrorActionPreference = 'Stop'
-
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host "Azure OpenAI Workshop - Terraform Deployment" -ForegroundColor Cyan
 Write-Host "Environment: $Environment" -ForegroundColor Cyan
 Write-Host "Location: $Location" -ForegroundColor Cyan
+
+Write-Host "`n[Pre] Using existing Terraform variables to get iteration value..." -ForegroundColor Cyan
+$tfvarsPath = "$PSScriptRoot\$Environment.tfvars"
+if (-not (Test-Path $tfvarsPath)) {
+    Write-Error "tfvars file not found: $tfvarsPath"
+    exit 1
+}
+
+$Iteration = ((get-content $tfvarsPath | select-string iteration).Line -split "=")[1].Trim().Trim('"')
+if ([String]::IsNullOrEmpty($Iteration)) {
+    Write-Error "Iteration must be defined in tfvars!"
+    exit 1
+}
+
 Write-Host "Iteration: $Iteration" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
 
