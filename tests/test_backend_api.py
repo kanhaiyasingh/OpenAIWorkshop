@@ -1,24 +1,42 @@
 import pytest
 import requests
 import json
+import time
 
 pytestmark = pytest.mark.integration
 
+# Increase timeout for Container Apps cold start
+DEFAULT_TIMEOUT = 60
+MAX_RETRIES = 3
+RETRY_DELAY = 10
 
-def make_backend_api_request(url, payload=None, method="POST", timeout=10):
-    """Make an HTTP request to backend API with proper headers."""
+
+def make_backend_api_request(url, payload=None, method="POST", timeout=DEFAULT_TIMEOUT, retries=MAX_RETRIES):
+    """Make an HTTP request to backend API with proper headers and retry logic."""
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json"
     }
 
-    if method.upper() == "POST":
-        response = requests.post(url, headers=headers,
-                                 json=payload, timeout=timeout)
-    else:
-        response = requests.get(url, headers=headers, timeout=timeout)
-
-    return response
+    last_error = None
+    for attempt in range(retries):
+        try:
+            if method.upper() == "POST":
+                response = requests.post(url, headers=headers,
+                                         json=payload, timeout=timeout)
+            else:
+                response = requests.get(url, headers=headers, timeout=timeout)
+            
+            # If we get a response (even error), return it
+            return response
+        except requests.RequestException as e:
+            last_error = e
+            if attempt < retries - 1:
+                print(f"Attempt {attempt + 1} failed: {e}. Retrying in {RETRY_DELAY}s...")
+                time.sleep(RETRY_DELAY)
+    
+    # All retries failed, raise the last error
+    raise last_error
 
 
 @pytest.fixture(scope="session")
