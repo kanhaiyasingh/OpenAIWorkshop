@@ -149,7 +149,7 @@ jobs:
   # Optional: Destroy infrastructure (only for test branches)
   destroy-infrastructure:
     needs: [ integration-tests ]
-    if: always() && (github.ref_name == 'tjs-infra-as-code' || (inputs.target_env && inputs.target_env == 'dev')) && needs.integration-tests.result == 'success'
+    if: always() && (github.ref_name == 'tjs-infra-as-code' || github.ref_name == 'james-dev' || (inputs.target_env && inputs.target_env == 'dev')) && needs.integration-tests.result == 'success'
     uses: ./.github/workflows/destroy.yml
     with:
       environment: >-
