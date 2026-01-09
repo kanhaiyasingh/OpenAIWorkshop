@@ -683,7 +683,7 @@ def seed_database(database) -> Dict[str, int]:
     counts["knowledge_documents"] = seed_container(database, CONTAINERS["knowledge_documents"], knowledge)
     
     # Seed customers and related data
-    num_customers = int(os.getenv("SEED_CUSTOMER_COUNT", "50"))
+    num_customers = int(os.getenv("SEED_CUSTOMER_COUNT", "250"))
     customer_data = generate_customers_and_related(num_customers)
     
     counts["customers"] = seed_container(database, CONTAINERS["customers"], customer_data["customers"])

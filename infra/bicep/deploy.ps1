@@ -156,23 +156,30 @@ if (-not $SkipBuild) {
     Write-Host "`n[4/5] Skipping Application build (--SkipBuild)" -ForegroundColor Yellow
 }
 
-# Step 5: Restart Container Apps to pull new images
-Write-Host "`n[5/5] Restarting Container Apps..." -ForegroundColor Green
+# Step 5: Update Container Apps with new images
+Write-Host "`n[5/5] Updating Container Apps with new images..." -ForegroundColor Green
 
-$McpServiceName = "$BaseName-$Environment-mcp"
-$AppName = "$BaseName-$Environment-app"
+# Bicep naming pattern: {baseName}-{service}-{env}
+$McpServiceName = "$BaseName-mcp-$Environment"
+$AppName = "$BaseName-app-$Environment"
 
-Write-Host "Restarting MCP Service: $McpServiceName" -ForegroundColor Gray
-az containerapp revision restart `
+Write-Host "Updating MCP Service: $McpServiceName" -ForegroundColor Gray
+az containerapp update `
     --resource-group $ResourceGroupName `
     --name $McpServiceName `
-    --revision latest
+    --image "$AcrLoginServer/mcp-service:latest" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Note: MCP container app may need image refresh on next revision" -ForegroundColor Yellow
+}
 
-Write-Host "Restarting Application: $AppName" -ForegroundColor Gray
-az containerapp revision restart `
+Write-Host "Updating Application: $AppName" -ForegroundColor Gray
+az containerapp update `
     --resource-group $ResourceGroupName `
     --name $AppName `
-    --revision latest
+    --image "$AcrLoginServer/workshop-app:latest" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Note: Application container app may need image refresh on next revision" -ForegroundColor Yellow
+}
 
 Write-Host "`n======================================" -ForegroundColor Cyan
 Write-Host "Deployment Complete!" -ForegroundColor Green

@@ -244,6 +244,35 @@ resource serviceIncidentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDat
   }
 }
 
+// KnowledgeDocuments container (for RAG/vector search)
+resource knowledgeDocumentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'KnowledgeDocuments'
+  properties: {
+    resource: {
+      id: 'KnowledgeDocuments'
+      partitionKey: {
+        paths: ['/category']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/embedding/*'
+          }
+        ]
+      }
+    }
+  }
+}
+
 // Private endpoint & DNS configuration
 var privateEndpointName = '${cosmosDbName}-pe'
 var privateDnsZoneGroupName = 'cosmosdb-zone-group'
