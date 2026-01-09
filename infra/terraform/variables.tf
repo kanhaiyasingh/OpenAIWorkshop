@@ -35,17 +35,17 @@ variable "openai_model_name" {
   type        = string
   default     = "gpt-5.2-chat"
 }
+
+variable "openai_model_version" {
+  description = "OpenAI model version"
+  type        = string
+  default     = "2025-12-11"
+}
 variable "openai_api_version" {
   description = "OpenAI API version"
   type        = string
   default     = "2025-04-01-preview"
 }
-variable "openai_api_version" {
-  description = "OpenAI model version"
-  type        = string
-  default     = "2025-12-11"
-}
-
 variable "openai_deployment_capacity" {
   description = "Capacity (TPM in thousands) for OpenAI deployment"
   type        = number
