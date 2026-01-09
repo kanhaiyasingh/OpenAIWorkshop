@@ -33,6 +33,9 @@ param containerAppsEnvironmentDomain string = ''
 @description('Use placeholder image for initial deployment (before real image is pushed to ACR)')
 param usePlaceholderImage bool = true
 
+@description('Seed Cosmos DB with sample data on MCP service startup (seeds if containers are empty)')
+param seedOnStartup bool = false
+
 var mcpServiceName = '${baseName}-mcp-${environmentName}'
 // Use placeholder image for initial deployment - update-containers.yml will set the real image
 var containerImage = !empty(imageName) ? imageName : (usePlaceholderImage ? 'mcr.microsoft.com/k8se/quickstart:latest' : '${containerRegistryName}.azurecr.io/mcp-service:${imageTag}')
@@ -49,11 +52,19 @@ var cosmosSecrets = (!useCosmosManagedIdentity && !empty(cosmosDbKey)) ? [
 
 var cosmosEnvSettings = concat([
   {
+    name: 'USE_COSMOSDB'
+    value: 'true'
+  }
+  {
+    name: 'SEED_ON_STARTUP'
+    value: string(seedOnStartup)
+  }
+  {
     name: 'COSMOSDB_ENDPOINT'
     value: cosmosDbEndpoint
   }
   {
-    name: 'COSMOS_DB_NAME'
+    name: 'COSMOS_DATABASE_NAME'
     value: cosmosDbName
   }
   {
