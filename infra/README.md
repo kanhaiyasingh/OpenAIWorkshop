@@ -22,21 +22,21 @@ This guide provides comprehensive instructions for deploying the OpenAI Workshop
 ```mermaid
 flowchart TB
     subgraph Internet
-        User[👤 Users]
+        User["👤 Users"]
     end
 
     subgraph Azure["☁️ Azure Resource Group"]
-        subgraph VNet["🔒 Virtual Network (10.10.0.0/16)"]
-            subgraph CASubnet["Container Apps Subnet (10.10.0.0/23)"]
+        subgraph VNet["🔒 Virtual Network"]
+            subgraph CASubnet["Container Apps Subnet"]
                 subgraph CAE["Container Apps Environment"]
-                    Backend["🖥️ Backend App<br/>(Public HTTPS)"]
-                    MCP["🔧 MCP Service<br/>(Internal Only)"]
+                    Backend["🖥️ Backend App"]
+                    MCP["🔧 MCP Service"]
                 end
             end
             
-            subgraph PESubnet["Private Endpoints Subnet (10.10.2.0/24)"]
-                CosmosPE["🔗 Cosmos DB<br/>Private Endpoint"]
-                OpenAIPE["🔗 Azure OpenAI<br/>Private Endpoint"]
+            subgraph PESubnet["Private Endpoints Subnet"]
+                CosmosPE["🔗 Cosmos DB PE"]
+                OpenAIPE["🔗 OpenAI PE"]
             end
         end
         
@@ -44,8 +44,8 @@ flowchart TB
         LogAnalytics["📊 Log Analytics"]
         
         subgraph Services["Azure PaaS Services"]
-            CosmosDB["🗄️ Cosmos DB<br/>• Customers<br/>• Products<br/>• Agent State"]
-            OpenAI["🧠 Azure OpenAI<br/>• GPT Model<br/>• Embeddings"]
+            CosmosDB["🗄️ Cosmos DB"]
+            OpenAI["🧠 Azure OpenAI"]
         end
         
         ManagedID["🔐 Managed Identities"]
@@ -91,7 +91,7 @@ sequenceDiagram
 flowchart LR
     subgraph ContainerApp["Container App"]
         App["Application"]
-        UAMI["User-Assigned<br/>Managed Identity"]
+        UAMI["Managed Identity"]
     end
     
     subgraph AzureAD["Microsoft Entra ID"]
@@ -99,18 +99,18 @@ flowchart LR
     end
     
     subgraph AzureServices["Azure Services"]
-        CosmosDB["Cosmos DB<br/>(RBAC Enabled)"]
-        OpenAI["Azure OpenAI<br/>(RBAC Enabled)"]
-        ACR["Container Registry<br/>(AcrPull Role)"]
+        CosmosDB["Cosmos DB"]
+        OpenAI["Azure OpenAI"]
+        ACR["Container Registry"]
     end
     
-    App -->|"1. Request Token"| UAMI
-    UAMI -->|"2. Get Token"| TokenService
-    TokenService -->|"3. Return Token"| UAMI
-    UAMI -->|"4. Token"| App
-    App -->|"5. Access with Token<br/>(No API Keys!)"| CosmosDB
-    App -->|"5. Access with Token"| OpenAI
-    UAMI -->|"Pull Images"| ACR
+    App --> UAMI
+    UAMI --> TokenService
+    TokenService --> UAMI
+    UAMI --> App
+    App --> CosmosDB
+    App --> OpenAI
+    UAMI --> ACR
 ```
 
 ---
@@ -313,23 +313,23 @@ flowchart TB
     
     subgraph Azure["Azure"]
         OIDC["OIDC Federation"]
-        TFState["Terraform State<br/>(Storage Account)"]
+        TFState["Terraform State"]
         ACR["Container Registry"]
         Resources["Azure Resources"]
     end
     
     Push --> Orchestrate
-    Orchestrate -->|"1. Preflight"| OIDC
-    Orchestrate -->|"2. Deploy"| Infra
+    Orchestrate --> OIDC
+    Orchestrate --> Infra
     Infra --> TFState
     Infra --> Resources
-    Orchestrate -->|"3. Build (parallel)"| DockerApp
-    Orchestrate -->|"3. Build (parallel)"| DockerMCP
+    Orchestrate --> DockerApp
+    Orchestrate --> DockerMCP
     DockerApp --> ACR
     DockerMCP --> ACR
-    Orchestrate -->|"4. Update"| Update
+    Orchestrate --> Update
     Update --> Resources
-    Orchestrate -->|"5. Test"| Tests
+    Orchestrate --> Tests
 ```
 
 ### GitHub Actions Features
