@@ -21,6 +21,9 @@ from fastmcp.utilities.logging import get_logger
 # Import common tools (backend selected via USE_COSMOSDB env var)
 from contoso_tools import *
 
+# Import data seeding module for Cosmos DB startup seeding
+from data_seeding import run_seeding_if_needed
+
 logger = get_logger("auth.debug")  
 
 
@@ -628,5 +631,13 @@ async def get_billing_summary(
 ##############################################################################  
 #                                RUN SERVER                                  #  
 ##############################################################################  
-if __name__ == "__main__":  
+if __name__ == "__main__":
+    # Run data seeding if using Cosmos DB and containers are empty
+    seeding_logger = logging.getLogger("mcp.data_seeding")
+    seeding_logger.setLevel(logging.INFO)
+    seeding_result = run_seeding_if_needed()
+    if seeding_result:
+        seeding_logger.info(f"Data seeding completed: {seeding_result}")
+    
+    # Start the MCP server
     asyncio.run(mcp.run_http_async(host="0.0.0.0", port=8000))  

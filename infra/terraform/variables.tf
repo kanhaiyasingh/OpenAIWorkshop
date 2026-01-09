@@ -266,3 +266,9 @@ variable "container_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "seed_cosmos_data" {
+  description = "Whether to seed Cosmos DB with sample data after deployment (for future use)"
+  type        = bool
+  default     = false
+}

@@ -23,7 +23,7 @@ param(
     [string]$Iteration = '002',
     
     [Parameter(Mandatory=$false)]
-    [string]$SubscriptionId = '840b5c5c-3f4a-459a-94fc-6bad2a969f9d',
+    [string]$SubscriptionId = '',
     
     [Parameter(Mandatory=$false)]
     [switch]$SkipBuild,
@@ -47,26 +47,33 @@ Write-Host "Location: $Location" -ForegroundColor Cyan
 Write-Host "Iteration: $Iteration" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
 
-# Set ARM_SUBSCRIPTION_ID for Terraform
-$env:ARM_SUBSCRIPTION_ID = $SubscriptionId
-Write-Host "`nUsing Subscription: $SubscriptionId" -ForegroundColor Yellow
-
 # Verify Azure CLI is logged in
 $account = az account show 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Error "Not logged in to Azure CLI. Please run: az login"
     exit 1
 }
+
+# Use provided SubscriptionId or get from current Azure CLI context
+if ([string]::IsNullOrEmpty($SubscriptionId)) {
+    $SubscriptionId = $account.id
+    Write-Host "`nUsing current subscription from Azure CLI: $SubscriptionId" -ForegroundColor Yellow
+} else {
+    Write-Host "`nUsing provided Subscription: $SubscriptionId" -ForegroundColor Yellow
+    # Set correct subscription if explicitly provided
+    az account set --subscription $SubscriptionId
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to set subscription. Check if you have access to: $SubscriptionId"
+        exit 1
+    }
+}
+
+# Set ARM_SUBSCRIPTION_ID for Terraform
+$env:ARM_SUBSCRIPTION_ID = $SubscriptionId
+
 $TenantId = $account.tenantId
 Write-Host "Using Tenant: $TenantId" -ForegroundColor Yellow
 Write-Host "Logged in as: $($account.user.name)" -ForegroundColor Yellow
-
-# Set correct subscription
-az account set --subscription $SubscriptionId
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to set subscription. Check if you have access to: $SubscriptionId"
-    exit 1
-}
 
 # Variables derived from Terraform naming conventions
 $ResourceGroupName = "rg-$ProjectName-$Environment-$Iteration"
