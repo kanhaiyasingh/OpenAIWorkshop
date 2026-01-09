@@ -14,6 +14,7 @@ create_openai_deployment = true
 openai_deployment_name   = "gpt-5.2-chat"
 openai_model_name        = "gpt-5.2-chat"
 openai_model_version     = "2025-12-11"
+openai_api_version       ="2025-04-01-preview"
 
 # OpenAI embedding deployment configuration
 create_openai_embedding_deployment = true
