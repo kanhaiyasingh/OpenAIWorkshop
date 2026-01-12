@@ -16,6 +16,7 @@ Infrastructure engineers and enterprise architects with in-depth Azure knowledge
 - ✅ **Your choice of IaC** — Bicep or Terraform, manual scripts or GitHub Actions
 - ✅ **Modern identity principles** — OIDC for GitHub Actions, Managed Identity for Azure services (no keys)
 - ✅ **Network isolation** — VNet with private endpoints, only frontend exposed to internet
+- ✅ **Automated CI/CD pipelines** — GitHub Actions, parallel container builds, integration testing, multi-environment deployment
 - ✅ **Enterprise-ready template** — Scalable, reusable blueprint for standalone or landing zone deployment
 
 ---
