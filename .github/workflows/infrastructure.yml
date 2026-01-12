@@ -1,0 +1,151 @@
+name: OpenAI Workshop Infrastructure Deployment and Test
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      iac-tool:
+        type: string
+        required: false
+        default: tf
+    outputs:
+      backend_endpoint:
+        description: "Backend API endpoint URL"
+        value: ${{ jobs.tf.outputs.BACKEND_API_ENDPOINT }}
+      mcp_endpoint:
+        description: "MCP service endpoint URL"
+        value: ${{ jobs.tf.outputs.MCP_ACA_URL }}
+      model_endpoint:
+        description: "Model endpoint URL"
+        value: ${{ jobs.tf.outputs.MODEL_ENDPOINT }}
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        default: dev
+        required: true
+      iac-tool:
+        description: "Choose your infrastructure as code tool"
+        type: choice
+        options:
+        - tf
+        - bicep
+        default: tf
+        required: true
+        
+
+jobs:
+  tf:
+    name: Terraform Deployment
+    runs-on: ubuntu-latest
+    # environment: removed to use repo-level variables
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.iac-tool || 'tf') == 'tf' }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      MODEL_ENDPOINT: ${{ steps.terraform.outputs.MODEL_ENDPOINT }}
+      MCP_ACA_URL: ${{ steps.terraform.outputs.MCP_ACA_URL }}
+      BACKEND_API_ENDPOINT: ${{ steps.terraform.outputs.BACKEND_API_ENDPOINT }}
+      KEY_VAULT_NAME: ${{ steps.terraform.outputs.KEY_VAULT_NAME }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Azure OIDC Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Setup
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Sanitize branch name for state key
+        id: sanitize
+        run: |
+          # Replace / and other invalid chars with - for valid Azure blob name
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          SAFE_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "branch=$SAFE_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init/Plan/Apply
+        id: terraform
+        run: |
+          cd infra/terraform
+          export ARM_USE_OIDC=true
+          export ARM_CLIENT_ID="${{ vars.AZURE_CLIENT_ID }}"
+          export ARM_TENANT_ID="${{ vars.AZURE_TENANT_ID }}"
+          export ARM_SUBSCRIPTION_ID="${{ vars.AZURE_SUBSCRIPTION_ID }}"
+
+          terraform init -backend-config="resource_group_name=${TFSTATE_RG}" \
+                         -backend-config="key=${TFSTATE_KEY}" -backend-config="storage_account_name=${TFSTATE_ACCOUNT}" \
+                         -backend-config="container_name=${TFSTATE_CONTAINER}" -backend-config="use_oidc=true" -backend-config="use_azuread_auth=true"
+          terraform plan -out tfplan \
+            -var project_name=${{ github.event.repository.name }} \
+            -var environment=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.base_ref == 'main' && 'prod') || (github.base_ref == 'int-agentic' && 'integration') || 'dev' }} \
+            -var tenant_id=${{ vars.AZURE_TENANT_ID }} \
+            -var subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }} \
+            -var acr_name=${{ vars.ACR_NAME }} \
+            -var location=${{ vars.AZ_REGION }} \
+            -var docker_image_mcp=${{ vars.DOCKER_IMAGE_MCP }} \
+            -var docker_image_backend=${{ vars.DOCKER_IMAGE_BACKEND }} \
+            -var iteration=${{ (github.event_name != 'workflow_dispatch' && github.base_ref != 'main' && github.base_ref != 'int-agentic') && '${GITHUB_SHA:0:7}' || vars.ITERATION }}
+
+          terraform apply -auto-approve tfplan
+
+          output=$(terraform output -raw openai_endpoint 2>/dev/null || true)
+          echo "MODEL_ENDPOINT=$output" >> $GITHUB_OUTPUT
+          mcp_aca_url=$(terraform output -raw mcp_aca_url 2>/dev/null || true)
+          echo "MCP_ACA_URL=$mcp_aca_url" >> $GITHUB_OUTPUT
+          be_aca_url=$(terraform output -raw be_aca_url 2>/dev/null || true)
+          echo "BACKEND_API_ENDPOINT=$be_aca_url" >> $GITHUB_OUTPUT
+
+        env:
+          TFSTATE_RG: ${{ vars.TFSTATE_RG }}
+          TFSTATE_ACCOUNT: ${{ vars.TFSTATE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          # Use sanitized branch name for valid Azure blob name
+          TFSTATE_KEY: "${{ github.event.repository.name }}-${{ steps.sanitize.outputs.branch }}.tfstate"
+
+  bicep:
+      runs-on: ubuntu-latest
+      # environment: removed to use repo-level variables
+      if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.iac-tool || 'tf') == 'bicep' }}
+      permissions:
+        id-token: write
+        contents: read    
+
+      steps:
+        - uses: actions/checkout@v6
+
+        - name: Azure OIDC Login
+          uses: azure/login@v2
+          with:
+            client-id: ${{ vars.AZURE_CLIENT_ID }}
+            tenant-id: ${{ vars.AZURE_TENANT_ID }}
+            subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+        - name: Bicep Install
+          uses: azure/setup-bicep@v1
+          with:
+            version: 'latest'
+
+        - name: Bicep Build and Deploy
+          run: |
+            cd infra/bicep
+            az deployment group create \
+              --resource-group ${{ vars.BICEP_DEPLOYMENT_RG }} \
+              --template-file main.bicep \
+              --parameters projectName=${{ github.event.repository.name }} \
+              --parameters location=${{ vars.AZ_REGION }} \
+              --parameters acrName=${{ vars.ACR_NAME }}   
+          env:
+            BICEP_DEPLOYMENT_RG: ${{ vars.BICEP_DEPLOYMENT_RG }}
+
+  # NOTE: Integration tests are run from orchestrate.yml AFTER containers are deployed
+  # Do not add test jobs here - tests need to run after update-containers completes

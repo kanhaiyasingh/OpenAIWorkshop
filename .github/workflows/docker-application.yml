@@ -1,0 +1,79 @@
+name: Build and Push Docker Image for Backend Application
+
+on:
+  # Only run via workflow_call from orchestrate.yml or manual dispatch
+  # Do not run automatically on pull_request - orchestrate.yml handles the full pipeline
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, integration, prod]
+        default: dev
+
+env:
+  IMAGE_NAME: backend-app
+  PROJECT_SUBPATH: agentic_ai/
+  IMAGE_TAG: ${{ inputs.environment && format('{0}-latest', inputs.environment) || 'latest' }}
+
+
+jobs:
+  build:
+    name: Build & Push Backend Image
+    runs-on: ubuntu-latest
+    # environment: ${{ inputs.environment || 'dev' }}  # Commented out to use repo-level variables
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure OIDC Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Determine ACR Name
+        id: acr
+        run: |
+          # Construct ACR name matching Terraform pattern: {project}{env}acr{iteration}
+          PROJECT="${{ vars.PROJECT_NAME || 'OpenAIWorkshop' }}"
+          ENV="${{ inputs.environment || 'dev' }}"
+          ITERATION="${{ vars.ITERATION || '002' }}"
+          ACR_NAME="${PROJECT}${ENV}acr${ITERATION}"
+          echo "name=${ACR_NAME}" >> $GITHUB_OUTPUT
+          echo "server=${ACR_NAME}.azurecr.io" >> $GITHUB_OUTPUT
+          echo "Using ACR: ${ACR_NAME}"
+
+      - name: Login to Azure Container Registry
+        run: |
+          # Get ACR access token using the OIDC-authenticated Azure CLI session
+          ACR_TOKEN=$(az acr login --name ${{ steps.acr.outputs.name }} --expose-token --query accessToken -o tsv)
+          echo "$ACR_TOKEN" | docker login ${{ steps.acr.outputs.server }} --username 00000000-0000-0000-0000-000000000000 --password-stdin
+
+      - name: Build and Push Image
+        run: |
+          cd ${{ env.PROJECT_SUBPATH }}
+          ACR_SERVER="${{ steps.acr.outputs.server }}"
+          
+          # Build with both SHA tag and environment tag
+          docker build \
+            -t "${ACR_SERVER}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            -t "${ACR_SERVER}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
+            -t "${ACR_SERVER}/${{ env.IMAGE_NAME }}:latest" \
+            -f applications/Dockerfile .
+          
+          # Push all tags
+          docker push "${ACR_SERVER}/${{ env.IMAGE_NAME }}" --all-tags
+          
+          echo "✅ Pushed: ${ACR_SERVER}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "ACR: ${{ steps.acr.outputs.name }}"
