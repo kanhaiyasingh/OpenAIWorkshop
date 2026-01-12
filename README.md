@@ -19,55 +19,25 @@ Welcome to the official repository for the Microsoft AI Agentic Workshop! This r
   
 ---  
   
-## What You Can Do With This Workshop  
+## What You Can Do With This Repo  
   
-- **Design and prototype agent solutions** for real-world business scenarios.  
-- **Compare single-agent vs. multi-agent** architectures and approaches.  
-- **Develop and contrast agent implementations** using different platforms:  
-  - **[Microsoft Agent Framework](https://github.com/microsoft/agent-framework)** (NEW!) - Microsoft's latest agentic AI framework with advanced multi-agent orchestration (Magentic workflows, handoffs, checkpointing)  
-  - Azure AI Agent Service  
-  - Semantic Kernel  
-  - Autogen  
+- **Design and prototype AI agent solutions** for real-world business scenarios
+- **Explore single-agent and multi-agent architectures** with different orchestration patterns
+- **Build with Microsoft Agent Framework** - advanced multi-agent orchestration, handoffs, and checkpointing
+- **Build end-to-end agentic AI systems** - Complete architecture from backend database, MCP tools server, agent orchestration, application backend, to React/Streamlit frontend
+- **Deploy to Azure with enterprise security** - VNet, private endpoints, managed identity, and CI/CD automation
   
 ---  
   
 ## Key Features  
-  
-- **🎯 Microsoft Agent Framework Support (NEW!):** Full integration with [Microsoft's Agent Framework](https://github.com/microsoft/agent-framework) featuring:
-  - **Now available via pip!** Install with: `pip install agent-framework` or `uv add agent-framework`
-  - **Single-agent** with MCP tools and streaming token-by-token responses
-  - **Multi-agent Magentic orchestration** with intelligent task delegation and progress tracking
-  - **Handoff-based multi-domain agents** for specialized task routing with smart context transfer
-  - **Checkpointing and resumable workflows** for long-running agentic tasks
-  - **Real-time WebSocket streaming** with internal agent process visibility
-  - 📚 **[See detailed pattern guide and documentation →](agentic_ai/agents/agent_framework/README.md)**
-  
-- **🖥️ Advanced UI Options:**  
-  - **React Frontend:** Real-time streaming visualization with agent internal processes, tool calls, orchestrator planning, and turn-by-turn history tracking
-  - **Streamlit Frontend:** Simple, elegant chat interface for quick prototyping and demos
 
-- **🔄 Workflow Orchestration (NEW!):** Enterprise-grade workflow capabilities with [comprehensive orchestration patterns](agentic_ai/workflow/):
-  - **Pregel-style execution engine** for complex multi-agent coordination
-  - **Type-safe messaging** with runtime contract enforcement
-  - **Checkpointing & resume** for long-running workflows
-  - **Human-in-the-loop** approval patterns with RequestInfoExecutor
-  - **Control flow patterns**: Switch/case routing, fan-out/fan-in, conditional edges
-  - **Real-time observability**: OpenTelemetry tracing, event streaming, WebSocket updates
-  - 🎯 **[Featured Demo: Fraud Detection System](agentic_ai/workflow/fraud_detection/)** - Production-ready workflow with React dashboard
-  
-- **Configurable LLM Backend:** Use the latest Azure OpenAI GPT models (e.g., GPT-5, GPT-4.1, GPT-4o).  
-- **MCP Server Integration:** Advanced tools to enhance agent orchestration and capabilities with Model Context Protocol.  
-- **A2A (Agent-to-Agent) Protocol Support:** Enables strict cross-domain, black-box multi-agent collaboration using [Google's A2A protocol](https://github.com/google-a2a/A2A). [Learn more &rarr;](agentic_ai/agents/semantic_kernel/multi_agent/a2a).  
-- **Durable Agent Pattern:** Includes a demo of a robust agent that persists its state, survives restarts, and manages long-running workflows. [Learn more &rarr;](agentic_ai/scenarios/durable_agent/README.md)  
-- **Flexible Agent Architecture:**  
-  - Supports single-agent, multi-agent, or reflection-based agents (selectable via `.env`).  
-  - Agents can self-loop, collaborate, reflect, or take on dynamic roles as defined in modules.  
-  - Multiple frameworks: Agent Framework, Autogen, Semantic Kernel, Azure AI Agent Service.  
-- **Session-Based Chat:** Persistent conversation history for each session.  
-- **Full-Stack Application:**  
-  - FastAPI backend with WebSocket and RESTful endpoints (chat, reset, history, etc.).  
-  - Choice of frontend: React (advanced streaming visualization) or Streamlit (simple chat).  
-- **Environment-Based Configuration:** Easily configure the system using `.env` files.  
+- **[Microsoft Agent Framework](https://github.com/microsoft/agent-framework) Integration** - Single-agent, multi-agent Magentic orchestration, and handoff-based domain routing with MCP tools. [Pattern guide →](agentic_ai/agents/agent_framework/README.md)
+- **[Workflow Orchestration](agentic_ai/workflow/)** - Pregel-style execution, checkpointing, human-in-the-loop patterns, and real-time observability. [Fraud Detection Demo →](agentic_ai/workflow/fraud_detection/)
+- **Advanced UI Options** - React frontend with streaming visualization or Streamlit for quick prototyping
+- **[MCP Server Integration](mcp/)** - Model Context Protocol for enhanced agent tool capabilities with advanced features: authentication, RBAC, and APIM integration
+- **[Emerging Agentic Scenarios](agentic_ai/scenarios/)** - Long-running workflows, progress updates, and durable agent patterns
+- **Agent State & History Persistence** - In-memory or CosmosDB backend for conversation history and agent state
+- **[Enterprise-Ready Reference Architecture](infra/README.md)** - Production-grade deployment with VNet integration, private endpoints, managed identity, Terraform/Bicep IaC, and GitHub Actions CI/CD  
   
 ---  
   
@@ -84,13 +54,14 @@ Welcome to the official repository for the Microsoft AI Agentic Workshop! This r
 
 ## Deploy to Azure
 
+For enterprise-ready deployment with VNet integration, private endpoints, managed identity, and CI/CD automation, see the **[Deployment Guide](./infra/README.md)**.
+
 | Deployment Method | Description | Guide |
 |-------------------|-------------|-------|
-| **🚀 Azure Developer CLI** | Single-command deployment (Recommended) | [AZD Deployment Guide](./AZD_DEPLOYMENT.md) |
-| **📖 Complete Guide** | All deployment methods with options | [Deployment Guide](./DEPLOYMENT.md) |
-| **🔒 Enterprise Deployment** | VNet, Private Endpoints, Managed Identity, Zero Trust | [Enterprise Guide](./infra/README.md#security-profiles) |
-| **🔧 Manual Deployment** | Local PowerShell/Terraform deployment | [Manual Steps](./infra/README.md#manual-deployment-powershell) |
-| **🚀 CI/CD Automation** | GitHub Actions with OIDC authentication | [GitHub Actions Setup](./infra/GITHUB_ACTIONS_SETUP.md) |
+| **🚀 Azure Developer CLI** | Single-command quick start | [azd Quick Start](./infra/README.md#azure-developer-cli-azd) |
+| **🔧 Manual Deployment** | PowerShell with Terraform/Bicep | [Manual Steps](./infra/README.md#manual-deployment-powershell) |
+| **🔒 Enterprise Security** | VNet, Private Endpoints, Managed Identity | [Security Profiles](./infra/README.md#security-profiles) |
+| **🚀 CI/CD Automation** | GitHub Actions with OIDC | [GitHub Actions Setup](./infra/GITHUB_ACTIONS_SETUP.md) |
   
 ---  
   

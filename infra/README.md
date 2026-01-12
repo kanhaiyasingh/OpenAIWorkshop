@@ -153,8 +153,58 @@ Choose the deployment method that best fits your workflow:
 
 | Method | Best For | Complexity | Automation |
 |--------|----------|------------|------------|
+| **[Azure Developer CLI (azd)](#azure-developer-cli-azd)** | Quick start, demos | Lowest | Partial |
 | **[Manual (PowerShell)](#manual-deployment-powershell)** | Local development, testing | Low | None |
 | **[GitHub Actions](#automated-cicd-github-actions)** | CI/CD, team collaboration | Medium | Full |
+
+---
+
+## Azure Developer CLI (azd)
+
+The fastest way to get started. Uses ACR remote builds (no local Docker required).
+
+### Prerequisites
+
+1. **Azure Developer CLI**: https://aka.ms/azd-install
+2. **Azure CLI** (v2.50+): https://aka.ms/azure-cli
+
+### Quick Start
+
+```powershell
+# Login to Azure
+azd auth login
+
+# Initialize environment
+azd env new agenticaiworkshop
+azd env set AZURE_LOCATION eastus2
+
+# Deploy everything (infrastructure + containers)
+azd up
+```
+
+### What azd up Does
+
+1. ✅ Provisions Azure infrastructure (OpenAI, Cosmos DB, Container Apps, ACR)
+2. ✅ Builds Docker images using ACR remote builds (no local Docker needed)
+3. ✅ Deploys Container Apps with the built images
+
+### Useful Commands
+
+```powershell
+# View deployment outputs
+azd env get-values
+
+# Rebuild and redeploy after code changes
+azd deploy
+
+# Stream container logs
+azd monitor --logs
+
+# Clean up all resources
+azd down
+```
+
+> **Note**: For enterprise security features (VNet, Private Endpoints, Managed Identity), use the [Manual Deployment](#manual-deployment-powershell) with Terraform/Bicep and configure the security profile parameters.
 
 ---
 
