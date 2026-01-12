@@ -59,11 +59,29 @@ resource "azurerm_container_app" "mcp" {
       memory = "1Gi"
 
       # ========== Cosmos DB Configuration ==========
+      # Enable Cosmos DB backend for MCP service
+      env {
+        name  = "USE_COSMOSDB"
+        value = "true"
+      }
+
+      # Enable data seeding on startup (seeds sample data if containers are empty)
+      env {
+        name  = "SEED_ON_STARTUP"
+        value = tostring(var.seed_cosmos_data)
+      }
+
       env {
         name  = "COSMOSDB_ENDPOINT"
         value = azurerm_cosmosdb_account.main.endpoint
       }
 
+      env {
+        name  = "COSMOS_DATABASE_NAME"
+        value = local.cosmos_database_name
+      }
+
+      # Agent state container (for agent persistence)
       env {
         name  = "COSMOS_DB_NAME"
         value = local.cosmos_database_name

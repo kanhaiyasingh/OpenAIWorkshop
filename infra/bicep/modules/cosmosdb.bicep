@@ -139,6 +139,140 @@ resource agentStateContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases
   }
 }
 
+// Invoices container
+resource invoicesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'Invoices'
+  properties: {
+    resource: {
+      id: 'Invoices'
+      partitionKey: {
+        paths: ['/subscription_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// Payments container
+resource paymentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'Payments'
+  properties: {
+    resource: {
+      id: 'Payments'
+      partitionKey: {
+        paths: ['/invoice_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// SecurityLogs container
+resource securityLogsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'SecurityLogs'
+  properties: {
+    resource: {
+      id: 'SecurityLogs'
+      partitionKey: {
+        paths: ['/customer_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// Orders container
+resource ordersContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'Orders'
+  properties: {
+    resource: {
+      id: 'Orders'
+      partitionKey: {
+        paths: ['/customer_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// SupportTickets container
+resource supportTicketsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'SupportTickets'
+  properties: {
+    resource: {
+      id: 'SupportTickets'
+      partitionKey: {
+        paths: ['/customer_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// DataUsage container
+resource dataUsageContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'DataUsage'
+  properties: {
+    resource: {
+      id: 'DataUsage'
+      partitionKey: {
+        paths: ['/subscription_id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// ServiceIncidents container
+resource serviceIncidentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'ServiceIncidents'
+  properties: {
+    resource: {
+      id: 'ServiceIncidents'
+      partitionKey: {
+        paths: ['/id']
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// KnowledgeDocuments container (for RAG/vector search)
+resource knowledgeDocumentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2025-10-15' = {
+  parent: database
+  name: 'KnowledgeDocuments'
+  properties: {
+    resource: {
+      id: 'KnowledgeDocuments'
+      partitionKey: {
+        paths: ['/category']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/embedding/*'
+          }
+        ]
+      }
+    }
+  }
+}
+
 // Private endpoint & DNS configuration
 var privateEndpointName = '${cosmosDbName}-pe'
 var privateDnsZoneGroupName = 'cosmosdb-zone-group'

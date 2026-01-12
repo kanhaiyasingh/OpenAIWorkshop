@@ -107,6 +107,12 @@ variable "use_cosmos_managed_identity" {
   default     = true
 }
 
+variable "seed_cosmos_data" {
+  description = "Seed Cosmos DB with sample data on MCP startup. Data is seeded only if containers are empty."
+  type        = bool
+  default     = false
+}
+
 variable "enable_private_endpoint" {
   description = "Enable private endpoint for Cosmos DB (disables public network access)"
   type        = bool

@@ -1,5 +1,12 @@
 # Azure Infrastructure Deployment Script for OpenAI Workshop
 # This script builds Docker images, pushes to ACR, and deploys infrastructure
+#
+# Usage:
+#   .\deploy.ps1                           # Full deployment with defaults
+#   .\deploy.ps1 -InfraOnly                # Deploy infra, skip container builds
+#   .\deploy.ps1 -SkipBuild                # Deploy but skip container builds
+#   .\deploy.ps1 -SeedCosmosData           # Seed Cosmos DB with sample data after deployment
+#   .\deploy.ps1 -McpInternalOnly          # Make MCP service internal-only
 
 param(
     [Parameter(Mandatory=$false)]
@@ -16,7 +23,16 @@ param(
     [switch]$SkipBuild,
     
     [Parameter(Mandatory=$false)]
-    [switch]$InfraOnly
+    [switch]$InfraOnly,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SeedCosmosData,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$UseCosmosManagedIdentity,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$McpInternalOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,14 +41,31 @@ Write-Host "======================================" -ForegroundColor Cyan
 Write-Host "Azure OpenAI Workshop Deployment" -ForegroundColor Cyan
 Write-Host "Environment: $Environment" -ForegroundColor Cyan
 Write-Host "Location: $Location" -ForegroundColor Cyan
+Write-Host "Seed Cosmos Data: $SeedCosmosData" -ForegroundColor Cyan
+Write-Host "Use Cosmos Managed Identity: $UseCosmosManagedIdentity" -ForegroundColor Cyan
+Write-Host "MCP Internal Only: $McpInternalOnly" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
+
+# Verify Azure CLI is logged in
+$account = az account show 2>$null | ConvertFrom-Json
+if (-not $account) {
+    Write-Error "Not logged in to Azure CLI. Please run: az login"
+    exit 1
+}
 
 # Variables
 $ResourceGroupName = "$BaseName-$Environment-rg"
-$SubscriptionId = (az account show --query id -o tsv)
+$SubscriptionId = $account.id
 $AcrName = "$BaseName$Environment" + "acr" -replace '-', ''  # ACR names can't have hyphens
 
 Write-Host "`nUsing Subscription: $SubscriptionId" -ForegroundColor Yellow
+Write-Host "Using Tenant: $($account.tenantId)" -ForegroundColor Yellow
+Write-Host "Logged in as: $($account.user.name)" -ForegroundColor Yellow
+
+# Convert switch parameters to Bicep boolean strings
+$seedCosmosDataParam = if ($SeedCosmosData) { "true" } else { "false" }
+$useCosmosManagedIdentityParam = if ($UseCosmosManagedIdentity) { "true" } else { "true" }  # Default to true
+$mcpInternalOnlyParam = if ($McpInternalOnly) { "true" } else { "false" }
 
 # Step 1: Deploy Infrastructure
 Write-Host "`n[1/5] Deploying Azure Infrastructure..." -ForegroundColor Green
@@ -40,6 +73,8 @@ az deployment sub create `
     --location $Location `
     --template-file $PSScriptRoot/main.bicep `
     --parameters location=$Location environmentName=$Environment baseName=$BaseName `
+                 seedCosmosData=$seedCosmosDataParam useCosmosManagedIdentity=$useCosmosManagedIdentityParam `
+                 mcpInternalOnly=$mcpInternalOnlyParam `
     --name "openai-workshop-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmmss')" `
     --query 'properties.outputs' -o json | Out-File -FilePath "$PSScriptRoot/../../deployment-outputs.json"
 
@@ -121,23 +156,30 @@ if (-not $SkipBuild) {
     Write-Host "`n[4/5] Skipping Application build (--SkipBuild)" -ForegroundColor Yellow
 }
 
-# Step 5: Restart Container Apps to pull new images
-Write-Host "`n[5/5] Restarting Container Apps..." -ForegroundColor Green
+# Step 5: Update Container Apps with new images
+Write-Host "`n[5/5] Updating Container Apps with new images..." -ForegroundColor Green
 
-$McpServiceName = "$BaseName-$Environment-mcp"
-$AppName = "$BaseName-$Environment-app"
+# Bicep naming pattern: {baseName}-{service}-{env}
+$McpServiceName = "$BaseName-mcp-$Environment"
+$AppName = "$BaseName-app-$Environment"
 
-Write-Host "Restarting MCP Service: $McpServiceName" -ForegroundColor Gray
-az containerapp revision restart `
+Write-Host "Updating MCP Service: $McpServiceName" -ForegroundColor Gray
+az containerapp update `
     --resource-group $ResourceGroupName `
     --name $McpServiceName `
-    --revision latest
+    --image "$AcrLoginServer/mcp-service:latest" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Note: MCP container app may need image refresh on next revision" -ForegroundColor Yellow
+}
 
-Write-Host "Restarting Application: $AppName" -ForegroundColor Gray
-az containerapp revision restart `
+Write-Host "Updating Application: $AppName" -ForegroundColor Gray
+az containerapp update `
     --resource-group $ResourceGroupName `
     --name $AppName `
-    --revision latest
+    --image "$AcrLoginServer/workshop-app:latest" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Note: Application container app may need image refresh on next revision" -ForegroundColor Yellow
+}
 
 Write-Host "`n======================================" -ForegroundColor Cyan
 Write-Host "Deployment Complete!" -ForegroundColor Green

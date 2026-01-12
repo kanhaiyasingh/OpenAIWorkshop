@@ -32,6 +32,9 @@ param enablePrivateEndpoints bool = false
 @description('Make MCP service internal-only (not exposed to public internet). Only apps in the same Container Apps environment can access it.')
 param mcpInternalOnly bool = false
 
+@description('Seed Cosmos DB with sample data on MCP service startup (seeds if containers are empty)')
+param seedCosmosData bool = false
+
 // Resource Group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: '${baseName}-${environmentName}-rg'
@@ -163,6 +166,7 @@ module mcpService 'modules/mcp-service.bicep' = {
     userAssignedIdentityResourceId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.resourceId : ''
     userAssignedIdentityClientId: useCosmosManagedIdentity ? containerAppsIdentity.outputs.clientId : ''
     mcpInternalOnly: mcpInternalOnly
+    seedOnStartup: seedCosmosData
     containerAppsEnvironmentDomain: containerAppsEnv.outputs.defaultDomain
     tags: tags
     usePlaceholderImage: true  // Use placeholder for initial deployment, update-containers.yml sets real image
