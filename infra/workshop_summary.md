@@ -1,4 +1,4 @@
-# Enterprise-Ready Agentic AI Infrastructure Workshop
+# Enterprise-Ready Agentic AI  Workshop
 
 **Build and deploy secure, end-to-end agentic AI solutions on Azure**
 
