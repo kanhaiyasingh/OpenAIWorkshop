@@ -64,7 +64,7 @@ sequenceDiagram
 | Capability                           | Status | Notes                                                                                                  |  
 |---------------------------------------|:------:|--------------------------------------------------------------------------------------------------------|  
 | Resilient state persistence           |   ✅   | Cosmos DB or in-mem dict                                                                               |  
-| Autogen agent re-hydration            |   ✅   | Agent loads TeamState on every request                                                                 |  
+| Agent re-hydration                    |   ✅   | Agent loads TeamState on every request                                                                 |  
 | Long-running tool scheduling          |   ✅   | Simulated via Python threading (20 s sleep)                                                            |  
 | Result injection after completion     |   ✅   | Worker edits saved state (`FunctionExecutionResultMessage`)                                            |  
 | Push notifications to UI (SSE)        |   ♻️   | Optional add-on shown in docs                                                                          |  
@@ -79,7 +79,7 @@ sequenceDiagram
   Abstract helper that reads env-vars and exposes `chat_async`.  
   
 - **agents/durable_agent/loop_agent.py**    
-  - Builds an Autogen `RoundRobinGroupChat` with one `AssistantAgent`.  
+  - Builds a `RoundRobinGroupChat` with one `AssistantAgent`.  
   - Registers normal MCP tools and a custom long-running tool `activate_new_line`.  
   - Spawns a background thread that, after the fake 20 s delay, loads the saved `TeamState`, injects a synthetic `ToolCallRequestEvent` plus matching `ToolCallExecutionEvent`, and rewrites the state.  
   

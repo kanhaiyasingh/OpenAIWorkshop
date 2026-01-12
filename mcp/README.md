@@ -4,7 +4,7 @@
 This repository illustrates how to design and operate production-grade MCP services that are:  
   
 - **Secure by default** and ready for multi-tenant exposure via Azure API Management (APIM).  
-- **Intelligent and agentic**, using Azure OpenAI and Autogen to orchestrate tool calls.  
+- **Intelligent and agentic**, using Azure OpenAI to orchestrate tool calls.  
 - **Advanced in user experience**, including long-running operations with live progress updates.
 - **Flexible backends**, supporting both SQLite (local) and Cosmos DB (Azure) storage.
 
@@ -188,7 +188,7 @@ flowchart TD
   
 ### Core Patterns Demonstrated  
   
-#### Agentic Server Powered by Azure OpenAI + Autogen  
+#### Agentic Server Powered by Azure OpenAI  
 - **Domain-specialized agents**:  
   - Billing  
   - Account/Security  
@@ -250,7 +250,7 @@ flowchart TD
 - **General auth choices**: Broken link: `general_mcp_security.md`general_mcp_security.md  
   
 ### Agentic Intelligence  
-- **Agentic server**: `mcp_service_agentic.py` (Autogen + Azure OpenAI)  
+- **Agentic server**: `mcp_service_agentic.py` (Azure OpenAI)  
 - **Domain orchestration**: `ask_billing_expert`, `ask_account_expert`, `ask_product_expert`  
 - **Shared tools/data**: `contoso_tools.py` (async DB + KB functions)  
 - **Database seed**: `data/create_db.py`  
