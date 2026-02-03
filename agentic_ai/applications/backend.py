@@ -286,7 +286,8 @@ class ChatRequest(BaseModel):
   
   
 class ChatResponse(BaseModel):  
-    response: str  
+    response: str
+    tools_used: List[Dict[str, Any]] = []  # List of {name: str, args: dict}  
   
   
 class ConversationHistoryResponse(BaseModel):  
@@ -325,8 +326,16 @@ async def chat(req: ChatRequest, token: str = Depends(verify_token)):
         agent = Agent(STATE_STORE, req.session_id, access_token=token)
     except TypeError:
         agent = Agent(STATE_STORE, req.session_id)
-    answer = await agent.chat_async(req.prompt)  
-    return ChatResponse(response=answer)  
+    answer = await agent.chat_async(req.prompt)
+    
+    # Get tool calls if the agent tracks them
+    tools_used = []
+    if hasattr(agent, 'get_tool_calls'):
+        tools_used = agent.get_tool_calls()
+    elif hasattr(agent, '_tool_calls'):
+        tools_used = agent._tool_calls
+    
+    return ChatResponse(response=answer, tools_used=tools_used)  
   
 @app.post("/reset_session")  
 async def reset_session(req: SessionResetRequest, token: str = Depends(verify_token)):  

@@ -1,4 +1,5 @@
 import os  
+import json
 import logging  
 from typing import Any, Dict, List, Optional, Union  
 from dotenv import load_dotenv  
@@ -7,7 +8,96 @@ from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 from azure.core.credentials import TokenCredential
 
 load_dotenv()  # Load environment variables from .env file if needed  
-  
+
+
+class ToolCallTrackingMixin:
+    """
+    Mixin class that provides tool call tracking functionality.
+    
+    Use this mixin in agents that need to track tool calls for evaluation.
+    The mixin handles:
+    - Accumulating streaming function call arguments
+    - Finalizing function calls with parsed arguments
+    - Providing access to tool calls made during a request
+    
+    Usage:
+        class MyAgent(ToolCallTrackingMixin, BaseAgent):
+            def __init__(self, state_store, session_id):
+                super().__init__(state_store, session_id)
+                self.init_tool_tracking()  # Call this in __init__
+    """
+    
+    def init_tool_tracking(self) -> None:
+        """Initialize tool tracking state. Call this in agent's __init__."""
+        self._tool_calls: List[Dict[str, Any]] = []
+        self._current_function_call: Dict[str, Any] | None = None
+        self._current_function_args: List[str] = []
+    
+    def clear_tool_calls(self) -> None:
+        """Clear tool calls from previous request. Call at start of chat_async."""
+        self._tool_calls = []
+        self._current_function_call = None
+        self._current_function_args = []
+    
+    def get_tool_calls(self) -> List[Dict[str, Any]]:
+        """Return the list of tool calls made during the last request.
+        
+        Returns list of dicts with:
+        - name: tool name
+        - args: arguments passed to the tool
+        """
+        return self._tool_calls.copy()
+    
+    def track_function_call_start(self, name: str) -> None:
+        """Start tracking a new function call. Call when function_call content is received."""
+        # Finalize any previous function call first
+        self._finalize_current_function_call()
+        self._current_function_call = {"name": name}
+        self._current_function_args = []
+    
+    def track_function_call_arguments(self, arguments: str) -> None:
+        """Accumulate streaming function call arguments."""
+        if arguments:
+            self._current_function_args.append(arguments)
+    
+    def _finalize_current_function_call(self) -> None:
+        """Finalize the current function call by parsing accumulated arguments."""
+        if self._current_function_call is None:
+            return
+        
+        # Join accumulated argument chunks
+        args_str = ''.join(self._current_function_args)
+        
+        # Parse the arguments
+        args = {}
+        if args_str:
+            try:
+                args = json.loads(args_str)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, store raw string
+                args = {"_raw": args_str} if args_str.strip() else {}
+        
+        self._tool_calls.append({
+            "name": self._current_function_call["name"],
+            "args": args
+        })
+        
+        # Reset accumulators
+        self._current_function_call = None
+        self._current_function_args = []
+    
+    def finalize_tool_tracking(self) -> None:
+        """Finalize any pending function calls. Call at end of streaming."""
+        self._finalize_current_function_call()
+    
+    def add_tool_call(self, name: str, args: Dict[str, Any] | None = None) -> None:
+        """Directly add a tool call (for non-streaming scenarios)."""
+        self._tool_calls.append({
+            "name": name,
+            "args": args or {}
+        })
+
+
 class BaseAgent:  
     """  
     Base class for all agents.  
