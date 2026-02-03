@@ -20,7 +20,7 @@ from agent_framework import (
 )
 from agent_framework.azure import AzureOpenAIChatClient  # type: ignore[import]
 
-from agents.base_agent import BaseAgent
+from agents.base_agent import BaseAgent, ToolCallTrackingMixin
 from agents.agent_framework.utils import create_filtered_tool_list
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class DictCheckpointStorage(CheckpointStorage):
             self._backing.pop("pending_prompt", None)
 
 
-class Agent(BaseAgent):
+class Agent(ToolCallTrackingMixin, BaseAgent):
     """Agent Framework implementation of the collaborative Magentic team."""
 
     DEFAULT_MANAGER_INSTRUCTIONS = (
@@ -226,6 +226,9 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
         self._stream_agent_id: Optional[str] = None
         self._stream_line_open: bool = False
         self._last_agent_message: Optional[str] = None  # Track last agent message for deduplication
+        
+        # Initialize tool tracking from mixin
+        self.init_tool_tracking()
 
     def set_websocket_manager(self, manager: Any) -> None:
         """Allow backend to inject WebSocket manager for streaming events."""

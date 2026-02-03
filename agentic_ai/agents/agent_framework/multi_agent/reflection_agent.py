@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 from agent_framework import AgentThread, ChatAgent, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIChatClient
 
-from agents.base_agent import BaseAgent
+from agents.base_agent import BaseAgent, ToolCallTrackingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ AGENT_NAMES = {
 }
 
 
-class Agent(BaseAgent):
+class Agent(ToolCallTrackingMixin, BaseAgent):
     """Reflection Agent with Primary Agent + Reviewer workflow."""
 
     def __init__(
@@ -55,6 +55,8 @@ class Agent(BaseAgent):
         self._access_token = access_token
         self._ws_manager = None
         self._max_refinements = max_refinements
+        # Initialize tool tracking from mixin
+        self.init_tool_tracking()
         logger.info(f"[Reflection] Initialized session: {session_id}")
 
     def set_websocket_manager(self, manager: Any) -> None:
@@ -154,12 +156,48 @@ class Agent(BaseAgent):
         prompt: str, 
         agent_id: str,
     ) -> str:
-        """Run an agent with optional streaming."""
+        """Run an agent with optional streaming.
+        
+        Even without WebSocket, we use run_stream to capture tool calls for evaluation.
+        """
         if self._ws_manager:
             return await self._run_agent_streaming(agent, prompt, agent_id)
         else:
-            result = await agent.run(prompt, thread=self._thread)
-            return result.text
+            # Use run_stream even without WebSocket to capture tool calls
+            return await self._run_agent_non_streaming(agent, prompt, agent_id)
+    
+    async def _run_agent_non_streaming(
+        self,
+        agent: ChatAgent,
+        prompt: str,
+        agent_id: str,
+    ) -> str:
+        """Run agent without WebSocket but still capture tool calls."""
+        chunks: List[str] = []
+        
+        async for chunk in agent.run_stream(prompt, thread=self._thread):
+            # Track tool calls for evaluation
+            if hasattr(chunk, 'contents') and chunk.contents:
+                for content in chunk.contents:
+                    if content.type == "function_call":
+                        if content.name:
+                            self.track_function_call_start(content.name)
+                        
+                        args_chunk = getattr(content, 'arguments', '')
+                        if args_chunk:
+                            self.track_function_call_arguments(args_chunk)
+                    
+                    elif content.type == "function_result":
+                        self.finalize_tool_tracking()
+            
+            # Collect text
+            if hasattr(chunk, 'text') and chunk.text:
+                chunks.append(chunk.text)
+        
+        # Finalize any remaining function call
+        self.finalize_tool_tracking()
+        
+        return ''.join(chunks)
 
     async def _run_agent_streaming(
         self, 
@@ -179,15 +217,25 @@ class Agent(BaseAgent):
         chunks: List[str] = []
         
         async for chunk in agent.run_stream(prompt, thread=self._thread):
-            # Handle tool calls
+            # Handle tool calls with argument tracking
             if hasattr(chunk, 'contents') and chunk.contents:
                 for content in chunk.contents:
                     if content.type == "function_call":
-                        await self._broadcast_raw({
-                            "type": "tool_called",
-                            "agent_id": agent_id,
-                            "tool_name": content.name,
-                        })
+                        if content.name:
+                            self.track_function_call_start(content.name)
+                            
+                            await self._broadcast_raw({
+                                "type": "tool_called",
+                                "agent_id": agent_id,
+                                "tool_name": content.name,
+                            })
+                        
+                        args_chunk = getattr(content, 'arguments', '')
+                        if args_chunk:
+                            self.track_function_call_arguments(args_chunk)
+                    
+                    elif content.type == "function_result":
+                        self.finalize_tool_tracking()
             
             # Stream text
             if hasattr(chunk, 'text') and chunk.text:
@@ -197,6 +245,9 @@ class Agent(BaseAgent):
                     "agent_id": agent_id,
                     "content": chunk.text,
                 })
+        
+        # Finalize any remaining function call
+        self.finalize_tool_tracking()
         
         response = ''.join(chunks)
         
@@ -221,6 +272,9 @@ class Agent(BaseAgent):
         await self._setup_agents()
         if not self._primary_agent or not self._reviewer or not self._thread:
             raise RuntimeError("Agents not initialized")
+
+        # Clear tool calls from previous request (from mixin)
+        self.clear_tool_calls()
 
         # Notify start
         await self._broadcast("plan", "🔄 Reflection Workflow\n\nStarting Primary Agent → Reviewer pipeline...")

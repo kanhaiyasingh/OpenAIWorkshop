@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from agent_framework import ChatAgent, ChatMessage, Role, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIChatClient
 
-from agents.base_agent import BaseAgent
+from agents.base_agent import BaseAgent, ToolCallTrackingMixin
 from agents.agent_framework.utils import create_filtered_tool_list
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ Rules:
 """
 
 
-class Agent(BaseAgent):
+class Agent(ToolCallTrackingMixin, BaseAgent):
     """
     Optimized handoff pattern using vanilla workflow and direct agent communication.
     
@@ -183,6 +183,9 @@ class Agent(BaseAgent):
         # Turn tracking for tool grouping
         self._turn_key = f"{session_id}_handoff_turn"
         self._current_turn = state_store.get(self._turn_key, 0)
+        
+        # Initialize tool tracking from mixin
+        self.init_tool_tracking()
         
         # Context transfer configuration: -1 = all history, 0 = none, N = last N turns
         self._context_transfer_turns = int(os.getenv("HANDOFF_CONTEXT_TRANSFER_TURNS", "-1"))
@@ -510,6 +513,9 @@ class Agent(BaseAgent):
         """
         await self._setup_agents()
 
+        # Clear tool calls from previous request (from mixin)
+        self.clear_tool_calls()
+
         # Increment turn counter
         self._current_turn += 1
         self.state_store[self._turn_key] = self._current_turn
@@ -589,18 +595,31 @@ class Agent(BaseAgent):
                 # Process contents in the chunk
                 if hasattr(chunk, 'contents') and chunk.contents:
                     for content in chunk.contents:
-                        # Check for tool/function calls
+                        # Check for tool/function calls - track with arguments
                         if content.type == "function_call":
-                            if self._ws_manager:
-                                await self._ws_manager.broadcast(
-                                    self.session_id,
-                                    {
-                                        "type": "tool_called",
-                                        "agent_id": target_domain,
-                                        "tool_name": content.name,
-                                        "turn": self._current_turn,
-                                    },
-                                )
+                            if content.name:
+                                # New function call - finalize previous and start new
+                                self.track_function_call_start(content.name)
+                                
+                                if self._ws_manager:
+                                    await self._ws_manager.broadcast(
+                                        self.session_id,
+                                        {
+                                            "type": "tool_called",
+                                            "agent_id": target_domain,
+                                            "tool_name": content.name,
+                                            "turn": self._current_turn,
+                                        },
+                                    )
+                            
+                            # Accumulate arguments
+                            args_chunk = getattr(content, 'arguments', '')
+                            if args_chunk:
+                                self.track_function_call_arguments(args_chunk)
+                        
+                        elif content.type == "function_result":
+                            # Function completed - finalize
+                            self.finalize_tool_tracking()
                 
                 # Extract text from chunk
                 if hasattr(chunk, 'text') and chunk.text:
@@ -620,6 +639,9 @@ class Agent(BaseAgent):
         except Exception as exc:
             logger.error(f"[HANDOFF] Error during agent streaming: {exc}", exc_info=True)
             raise
+        
+        # Finalize any remaining function call
+        self.finalize_tool_tracking()
 
         assistant_response = ''.join(full_response)
 
@@ -682,16 +704,26 @@ class Agent(BaseAgent):
                         if hasattr(chunk, 'contents') and chunk.contents:
                             for content in chunk.contents:
                                 if content.type == "function_call":
-                                    if self._ws_manager:
-                                        await self._ws_manager.broadcast(
-                                            self.session_id,
-                                            {
-                                                "type": "tool_called",
-                                                "agent_id": new_target_domain,
-                                                "tool_name": content.name,
-                                                "turn": self._current_turn,
-                                            },
-                                        )
+                                    if content.name:
+                                        self.track_function_call_start(content.name)
+                                        
+                                        if self._ws_manager:
+                                            await self._ws_manager.broadcast(
+                                                self.session_id,
+                                                {
+                                                    "type": "tool_called",
+                                                    "agent_id": new_target_domain,
+                                                    "tool_name": content.name,
+                                                    "turn": self._current_turn,
+                                                },
+                                            )
+                                    
+                                    args_chunk = getattr(content, 'arguments', '')
+                                    if args_chunk:
+                                        self.track_function_call_arguments(args_chunk)
+                                
+                                elif content.type == "function_result":
+                                    self.finalize_tool_tracking()
                         
                         if hasattr(chunk, 'text') and chunk.text:
                             full_response_handoff.append(chunk.text)
@@ -708,6 +740,9 @@ class Agent(BaseAgent):
                 except Exception as exc:
                     logger.error(f"[HANDOFF] Error during handoff agent streaming: {exc}", exc_info=True)
                     raise
+                
+                # Finalize any remaining function call
+                self.finalize_tool_tracking()
                 
                 # Use handoff response
                 assistant_response = ''.join(full_response_handoff)

@@ -1,0 +1,10 @@
+# Evaluation results directory
+eval_results/
+*.pyc
+__pycache__/
+.pytest_cache/
+*.json.bak
+agent_traces.json
+
+# Generated evaluation data (created by run_agent_eval.py)
+evaluation_input_data.jsonl
