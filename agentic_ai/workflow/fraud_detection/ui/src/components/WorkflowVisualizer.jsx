@@ -51,7 +51,7 @@ const initialNodes = [
     id: 'review_gateway',
     type: 'custom',
     position: { x: 550, y: 500 },
-    data: { label: 'Review Gateway', status: 'idle', description: 'Routes to analyst review' },
+    data: { label: 'Review Gateway', status: 'idle', description: 'Human analyst review (pauses workflow)' },
   },
   {
     id: 'auto_clear_executor',
@@ -60,21 +60,15 @@ const initialNodes = [
     data: { label: 'Auto Clear', status: 'idle', description: 'Auto-clears low risk' },
   },
   {
-    id: 'analyst_review',
-    type: 'custom',
-    position: { x: 550, y: 650 },
-    data: { label: 'Analyst Review', status: 'idle', description: 'Human review required' },
-  },
-  {
     id: 'fraud_action_executor',
     type: 'custom',
-    position: { x: 550, y: 800 },
+    position: { x: 550, y: 650 },
     data: { label: 'Fraud Action', status: 'idle', description: 'Execute fraud action' },
   },
   {
     id: 'final_notification_executor',
     type: 'custom',
-    position: { x: 400, y: 950 },
+    position: { x: 400, y: 800 },
     data: { label: 'Final Notification', status: 'idle', description: 'Send notifications' },
   },
 ];
@@ -94,10 +88,8 @@ const initialEdges = [
   { id: 'e3-1', source: 'fraud_risk_aggregator', target: 'review_gateway', label: 'High Risk', style: { stroke: '#f44336' } },
   { id: 'e3-2', source: 'fraud_risk_aggregator', target: 'auto_clear_executor', label: 'Low Risk', style: { stroke: '#4caf50' } },
   
-  // Review loop
-  { id: 'e4-1', source: 'review_gateway', target: 'analyst_review' },
-  { id: 'e4-2', source: 'analyst_review', target: 'review_gateway', animated: true, style: { stroke: '#ff9800' } },
-  { id: 'e4-3', source: 'review_gateway', target: 'fraud_action_executor' },
+  // Review gateway to fraud action (human review happens via request_info, then proceeds)
+  { id: 'e4-1', source: 'review_gateway', target: 'fraud_action_executor', animated: true, style: { stroke: '#ff9800' } },
   
   // Final paths
   { id: 'e5-1', source: 'auto_clear_executor', target: 'final_notification_executor' },
