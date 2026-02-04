@@ -16,12 +16,13 @@ Flow:
 3. Fan-In to FraudRiskAggregatorExecutor (LLM-based agent):
    - Produces FraudRiskScore and recommended action (lock account, refund charges, ignore)
 4. SwitchCaseEdgeRunner:
-   - If risk score ≥ threshold → route to RequestInfoExecutor for human fraud analyst review
+   - If risk score ≥ threshold → route to ReviewGatewayExecutor for human fraud analyst review
    - Else → route to AutoClearExecutor
-5. RequestInfoExecutor → sends "Fraud Case Review Request" to analyst with full context
-6. Workflow pauses — checkpoint saved
+5. ReviewGatewayExecutor → calls ctx.request_info() to request analyst decision, workflow pauses
+6. Checkpoint saved — workflow awaits analyst response
 7. Analyst decides (approve lock/refund or clear)
 8. Workflow resumes:
+   - ReviewGatewayExecutor's @response_handler processes analyst decision
    - FraudActionExecutor → performs chosen action (e.g., lock account, reverse charges)
 9. FinalNotificationExecutor → informs customer and logs audit trail
 
@@ -30,7 +31,7 @@ Demonstrates:
 - Fan-out pattern to multiple specialist agents with MCP tools
 - Fan-in aggregation to produce single risk assessment
 - LLM-based risk scoring
-- Human-in-the-loop for high-risk cases
+- Human-in-the-loop via ctx.request_info() and @response_handler
 - Checkpointing for workflow pause/resume
 """
 
@@ -54,14 +55,12 @@ from agent_framework import (
     FileCheckpointStorage,
     MCPStreamableHTTPTool,
     RequestInfoEvent,
-    RequestInfoExecutor,
-    RequestInfoMessage,
-    RequestResponse,
     WorkflowBuilder,
     WorkflowContext,
     WorkflowOutputEvent,
     WorkflowStatusEvent,
     handler,
+    response_handler,
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from pydantic import BaseModel, Field
@@ -141,8 +140,8 @@ class FraudRiskAssessment:
 
 
 @dataclass
-class AnalystReviewRequest(RequestInfoMessage):
-    """Request for analyst review sent to RequestInfoExecutor."""
+class AnalystReviewRequest:
+    """Request for analyst review - used with ctx.request_info()."""
 
     assessment: FraudRiskAssessment | None = None
     prompt: str = ""
@@ -678,18 +677,30 @@ REASONING: [Your comprehensive reasoning]
 
 
 class ReviewGatewayExecutor(Executor):
-    """Gateway that routes high-risk assessments to RequestInfoExecutor for human review."""
+    """
+    Gateway that handles high-risk assessments with human-in-the-loop review.
+    
+    Uses the new request_info API:
+    1. Receives high-risk assessment
+    2. Calls ctx.request_info() to pause workflow and request analyst input
+    3. @response_handler receives the analyst's decision
+    4. Forwards decision to FraudActionExecutor
+    """
 
-    def __init__(self, analyst_review_id: str, fraud_action_id: str, id: str = "review_gateway") -> None:
+    def __init__(self, fraud_action_id: str, id: str = "review_gateway") -> None:
         super().__init__(id=id)
-        self._analyst_review_id = analyst_review_id
         self._fraud_action_id = fraud_action_id
+        # Store the assessment for use in the response handler
+        self._pending_assessment: FraudRiskAssessment | None = None
 
     @handler
     async def handle_assessment(
-        self, assessment: FraudRiskAssessment, ctx: WorkflowContext[AnalystReviewRequest]
+        self, assessment: FraudRiskAssessment, ctx: WorkflowContext[AnalystDecision]
     ) -> None:
         logger.info(f"[ReviewGateway] Routing high-risk assessment {assessment.alert_id} to analyst")
+
+        # Store assessment for response handler
+        self._pending_assessment = assessment
 
         # Create analyst review request
         request = AnalystReviewRequest(
@@ -697,25 +708,33 @@ class ReviewGatewayExecutor(Executor):
             prompt=f"Review fraud case for alert {assessment.alert_id}. Risk score: {assessment.overall_risk_score:.2f}. Recommended action: {assessment.recommended_action}",
         )
 
-        # Send to RequestInfoExecutor
-        await ctx.send_message(request, target_id=self._analyst_review_id)
+        # Request info from external analyst - workflow will pause here
+        # The response will be handled by the @response_handler below
+        await ctx.request_info(request, AnalystDecision)
+        logger.info(f"[ReviewGateway] Waiting for analyst decision on {assessment.alert_id}")
 
-    @handler
+    @response_handler
     async def handle_analyst_response(
-        self, response: RequestResponse[AnalystReviewRequest, AnalystDecision], ctx: WorkflowContext[AnalystDecision]
+        self,
+        original_request: AnalystReviewRequest,
+        response: AnalystDecision,
+        ctx: WorkflowContext[AnalystDecision],
     ) -> None:
-        logger.info(f"[ReviewGateway] Received analyst decision")
+        """Handle the analyst's decision and forward to fraud action executor."""
+        logger.info(f"[ReviewGateway] Received analyst decision: {response.approved_action}")
 
-        assessment = response.original_request.assessment if response.original_request else None
-        decision = response.data
-
-        if assessment and getattr(decision, "customer_id", None) in (None, 0):
-            # Now using dataclasses, use replace() to update fields
+        # Ensure decision has customer_id from original assessment
+        if original_request.assessment and getattr(response, "customer_id", None) in (None, 0):
             from dataclasses import replace
-            decision = replace(decision, customer_id=assessment.customer_id)
+            response = replace(
+                response,
+                customer_id=original_request.assessment.customer_id,
+                alert_id=original_request.assessment.alert_id,
+            )
 
         # Forward the analyst decision to fraud action executor
-        await ctx.send_message(decision, target_id=self._fraud_action_id)
+        await ctx.send_message(response, target_id=self._fraud_action_id)
+        logger.info(f"[ReviewGateway] Forwarded decision to fraud action executor")
 
 
 class AutoClearExecutor(Executor):
@@ -822,7 +841,7 @@ async def create_fraud_detection_workflow(
     """
     Build the fraud detection workflow.
 
-    Topology:
+    Topology (updated for new request_info API):
     AlertRouter → [UsagePattern, Location, Billing] → FraudRiskAggregator
                                                             ↓
                                             (Switch based on risk score)
@@ -830,10 +849,14 @@ async def create_fraud_detection_workflow(
                                     ┌───────────────────────┴──────────────────────┐
                                     ↓                                              ↓
                             (High Risk)                                     (Low Risk)
-                        RequestInfoExecutor                              AutoClearExecutor
-                                    ↓                                              ↓
-                           (Analyst Decision)                                      ↓
+                        ReviewGateway                                    AutoClearExecutor
+                    (uses ctx.request_info                                       ↓
+                     for human-in-the-loop)                                      ↓
+                                    ↓                                            ↓
                         FraudActionExecutor ────────────────────→ FinalNotificationExecutor
+    
+    Note: ReviewGateway now uses ctx.request_info() and @response_handler
+    instead of the deprecated RequestInfoExecutor.
     """
 
     # Create executors
@@ -846,10 +869,8 @@ async def create_fraud_detection_workflow(
     fraud_action = FraudActionExecutor()
     final_notification = FinalNotificationExecutor()
 
-    # Create human-in-the-loop executors
-    analyst_review = RequestInfoExecutor(id="analyst_review")
+    # Create human-in-the-loop executor (now uses ctx.request_info internally)
     review_gateway = ReviewGatewayExecutor(
-        analyst_review_id=analyst_review.id,
         fraud_action_id=fraud_action.id,
     )
 
@@ -862,23 +883,21 @@ async def create_fraud_detection_workflow(
     # Fan-in edge: 3 analysts → Aggregator (waits for all 3)
     builder.add_fan_in_edges([usage_executor, location_executor, billing_executor], aggregator)
 
-    # # Switch/case edges: Aggregator → High risk OR Low risk
+    # Switch/case edges: Aggregator → High risk OR Low risk
     builder.add_switch_case_edge_group(
         aggregator,
         [
-            # High risk → Review Gateway → Analyst review
+            # High risk → Review Gateway (will request human input via ctx.request_info)
             Case(condition=lambda assessment: assessment.overall_risk_score >= 0.6, target=review_gateway),
             # Low risk → Auto clear
             Default(target=auto_clear),
         ],
     )
 
-    # # Review gateway routes to analyst review and back, then to fraud action
-    builder.add_edge(review_gateway, analyst_review)
-    builder.add_edge(analyst_review, review_gateway)
+    # Review gateway → Fraud action (after analyst decision via @response_handler)
     builder.add_edge(review_gateway, fraud_action)
 
-    # # Both paths → Final notification
+    # Both paths → Final notification
     builder.add_edge(auto_clear, final_notification)
     builder.add_edge(fraud_action, final_notification)
 
