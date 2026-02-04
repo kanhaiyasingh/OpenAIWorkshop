@@ -33,9 +33,10 @@ Welcome to the official repository for the Microsoft AI Agentic Workshop! This r
 
 - **[Microsoft Agent Framework](https://github.com/microsoft/agent-framework) Integration** - Single-agent, multi-agent Magentic orchestration, and handoff-based domain routing with MCP tools. [Pattern guide →](agentic_ai/agents/agent_framework/README.md)
 - **[Workflow Orchestration](agentic_ai/workflow/)** - Hybrid Workflow + Durable Task architecture with fan-out/fan-in topology, human-in-the-loop, and real-time observability. [Fraud Detection Demo →](agentic_ai/workflow/fraud_detection_durable/)
+- **[Observability with Application Insights](agentic_ai/observability/)** - Full tracing of agent executions, tool calls, and LLM invocations with pre-built Grafana dashboards. [Setup Guide →](agentic_ai/observability/README.md)
 - **Advanced UI Options** - React frontend with interactive workflow visualization and step-by-step tool call details
 - **[MCP Server Integration](mcp/)** - Model Context Protocol for enhanced agent tool capabilities with advanced features: authentication, RBAC, and APIM integration
-- **[Emerging Agentic Scenarios](agentic_ai/scenarios/)** - Long-running workflows, progress updates, and durable agent patterns
+- **[Agent Evaluations](agentic_ai/evaluations/)** - Evaluate agent performance with custom metrics and test datasets
 - **Agent State & History Persistence** - In-memory or CosmosDB backend for conversation history and agent state
 - **[Enterprise-Ready Reference Architecture](infra/README.md)** - Production-grade deployment with VNet integration, private endpoints, managed identity, Terraform/Bicep IaC, and GitHub Actions CI/CD  
   

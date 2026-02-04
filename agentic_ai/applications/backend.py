@@ -15,6 +15,9 @@ import logging
 from pathlib import Path  
 from typing import Dict, List, Any, Optional, Set, DefaultDict
 from collections import defaultdict
+
+# Add parent directory to path for observability module
+sys.path.insert(0, str(Path(__file__).parent.parent))
   
 import httpx
 import jwt
@@ -29,9 +32,28 @@ from pydantic import BaseModel
 from dotenv import load_dotenv  
 
 # ------------------------------------------------------------------  
-# Environment  
+# Environment (load first so observability can read connection string)
 # ------------------------------------------------------------------  
 load_dotenv()  # read .env if present  
+
+# ------------------------------------------------------------------  
+# Observability (must be before any agent imports)
+# ------------------------------------------------------------------  
+from observability import setup_observability
+
+# Initialize Application Insights tracing if configured
+# All agents (single, reflection, handoff, etc.) are automatically traced
+_observability_enabled = setup_observability(
+    service_name="contoso-agent-backend",
+    enable_live_metrics=True,
+    enable_sensitive_data=os.getenv("ENABLE_SENSITIVE_DATA", "false").lower() in ("1", "true", "yes"),
+)
+if _observability_enabled:
+    logging.getLogger(__name__).info("✅ Application Insights observability enabled")
+
+# ------------------------------------------------------------------  
+# Auth Configuration
+# ------------------------------------------------------------------  
 
 # Feature flag: disable auth for local dev / demos
 DISABLE_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
