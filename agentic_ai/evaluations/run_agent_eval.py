@@ -73,9 +73,6 @@ print("=" * 80)
 # Import evaluation framework
 from evaluations import AgentEvaluationRunner, AgentTrace
 
-# Import utilities
-# from applications.utils import get_state_store  # Commented out - not needed for evaluations
-
 
 class ToolCallTracker:
     """Captures tool calls emitted via the agent's WebSocket-style broadcast.

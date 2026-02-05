@@ -16,25 +16,24 @@ import {
 import GavelIcon from '@mui/icons-material/Gavel';
 import SendIcon from '@mui/icons-material/Send';
 import { ACTION_OPTIONS } from '../constants/workflow';
-import { getRiskLevel, getRiskColor } from '../utils/uiHelpers';
 
 /**
- * Panel for analyst to make decisions on fraud alerts
+ * Panel for analyst to make decisions on fraud alerts (Durable version)
  * @param {Object} props - Component props
- * @param {Object} props.decision - Decision request object
+ * @param {Object} props.decision - Decision request object with instance_id, alert_id, customer_id
  * @param {Function} props.onSubmit - Callback to submit decision
  */
 function AnalystDecisionPanel({ decision, onSubmit }) {
   const [selectedAction, setSelectedAction] = useState(
-    decision.data?.recommended_action || 'clear'
+    decision.recommended_action || 'block'
   );
   const [notes, setNotes] = useState('');
 
   const handleSubmit = () => {
     onSubmit({
-      request_id: decision.request_id,
-      alert_id: decision.data.alert_id,
-      customer_id: decision.data.customer_id,
+      instance_id: decision.instance_id,
+      alert_id: decision.alert_id,
+      customer_id: decision.customer_id,
       approved_action: selectedAction,
       analyst_notes: notes || 'Analyst decision from UI',
       analyst_id: 'analyst_ui',
@@ -76,58 +75,26 @@ function AnalystDecisionPanel({ decision, onSubmit }) {
       {/* Risk Assessment */}
       <Box>
         <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
-          Risk Assessment
+          Review Required
         </Typography>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5 }}>
-          <Typography variant="caption">Risk Score:</Typography>
-          <Chip
-            label={`${(decision.data?.risk_score || 0).toFixed(2)} - ${getRiskLevel(
-              decision.data?.risk_score || 0
-            )}`}
-            color={getRiskColor(decision.data?.risk_score || 0)}
-            size="small"
-            sx={{ height: 20, fontSize: '0.7rem' }}
-          />
+          <Typography variant="caption">Alert ID:</Typography>
+          <Chip label={decision.alert_id || 'N/A'} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-          <Typography variant="caption">Alert ID:</Typography>
-          <Chip label={decision.data?.alert_id} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+          <Typography variant="caption">Customer:</Typography>
+          <Chip label={decision.customer_id || 'N/A'} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
         </Box>
       </Box>
 
-      {/* Reasoning */}
-      {decision.data?.reasoning && (
-        <Box>
-          <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
-            AI Analysis
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 0.75, bgcolor: 'grey.50', maxHeight: 120, overflow: 'auto' }}>
-            <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', fontSize: '0.7rem' }}>
-              {decision.data.reasoning.length > 500 
-                ? decision.data.reasoning.substring(0, 500) + '...' 
-                : decision.data.reasoning}
-            </Typography>
-          </Paper>
-        </Box>
-      )}
-
-      {/* Recommended Action */}
+      {/* Instance Info */}
       <Box>
         <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
-          Recommended Action
+          Instance ID
         </Typography>
-        <Chip
-          label={
-            ACTION_OPTIONS.find((opt) => opt.value === decision.data?.recommended_action)
-              ?.label || 'Unknown'
-          }
-          color={
-            ACTION_OPTIONS.find((opt) => opt.value === decision.data?.recommended_action)
-              ?.color || 'default'
-          }
-          size="small"
-          sx={{ height: 20, fontSize: '0.7rem' }}
-        />
+        <Typography variant="caption" sx={{ wordBreak: 'break-all', fontSize: '0.65rem', opacity: 0.7 }}>
+          {decision.instance_id}
+        </Typography>
       </Box>
 
       <Divider sx={{ my: 0.5 }} />

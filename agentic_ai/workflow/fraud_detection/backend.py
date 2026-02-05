@@ -28,12 +28,113 @@ from agent_framework import (
     WorkflowOutputEvent,
     WorkflowStatusEvent,
     RequestInfoEvent,
-    RequestInfoExecutor,
+    SuperStepCompletedEvent,
+    WorkflowCheckpoint,
+    get_checkpoint_summary,
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 import os
+import json
+from pathlib import Path
+from dataclasses import asdict
+
+
+# ============================================================================
+# UTF-8 Checkpoint Storage Wrapper (fixes Windows encoding issues)
+# ============================================================================
+
+class UTF8FileCheckpointStorage:
+    """
+    Wrapper around FileCheckpointStorage that ensures UTF-8 encoding.
+    
+    This fixes the Windows 'charmap' codec error when LLM output contains
+    Unicode characters (like combining diacritical marks) that can't be
+    encoded with the default cp1252 encoding.
+    """
+
+    def __init__(self, storage_path: str | Path):
+        """Initialize the file storage with UTF-8 encoding."""
+        self.storage_path = Path(storage_path)
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Initialized UTF-8 file checkpoint storage at {self.storage_path}")
+
+    async def save_checkpoint(self, checkpoint: WorkflowCheckpoint) -> str:
+        """Save a checkpoint with UTF-8 encoding and return its ID."""
+        file_path = self.storage_path / f"{checkpoint.checkpoint_id}.json"
+        checkpoint_dict = asdict(checkpoint)
+
+        def _write_atomic() -> None:
+            tmp_path = file_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(checkpoint_dict, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, file_path)
+
+        await asyncio.to_thread(_write_atomic)
+        logger.info(f"Saved checkpoint {checkpoint.checkpoint_id} to {file_path}")
+        return checkpoint.checkpoint_id
+
+    async def load_checkpoint(self, checkpoint_id: str) -> WorkflowCheckpoint | None:
+        """Load a checkpoint by ID with UTF-8 encoding."""
+        file_path = self.storage_path / f"{checkpoint_id}.json"
+
+        if not file_path.exists():
+            return None
+
+        def _read() -> dict[str, Any]:
+            with open(file_path, encoding="utf-8") as f:
+                return json.load(f)
+
+        checkpoint_dict = await asyncio.to_thread(_read)
+        checkpoint = WorkflowCheckpoint(**checkpoint_dict)
+        logger.info(f"Loaded checkpoint {checkpoint_id} from {file_path}")
+        return checkpoint
+
+    async def list_checkpoint_ids(self, workflow_id: str | None = None) -> list[str]:
+        """List checkpoint IDs with UTF-8 encoding."""
+        def _list_ids() -> list[str]:
+            checkpoint_ids: list[str] = []
+            for file_path in self.storage_path.glob("*.json"):
+                try:
+                    with open(file_path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if workflow_id is None or data.get("workflow_id") == workflow_id:
+                        checkpoint_ids.append(data.get("checkpoint_id", file_path.stem))
+                except Exception as e:
+                    logger.warning(f"Failed to read checkpoint file {file_path}: {e}")
+            return checkpoint_ids
+
+        return await asyncio.to_thread(_list_ids)
+
+    async def list_checkpoints(self, workflow_id: str | None = None) -> list[WorkflowCheckpoint]:
+        """List checkpoint objects with UTF-8 encoding."""
+        def _list_checkpoints() -> list[WorkflowCheckpoint]:
+            checkpoints: list[WorkflowCheckpoint] = []
+            for file_path in self.storage_path.glob("*.json"):
+                try:
+                    with open(file_path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if workflow_id is None or data.get("workflow_id") == workflow_id:
+                        checkpoints.append(WorkflowCheckpoint.from_dict(data))
+                except Exception as e:
+                    logger.warning(f"Failed to read checkpoint file {file_path}: {e}")
+            return checkpoints
+
+        return await asyncio.to_thread(_list_checkpoints)
+
+    async def delete_checkpoint(self, checkpoint_id: str) -> bool:
+        """Delete a checkpoint by ID."""
+        file_path = self.storage_path / f"{checkpoint_id}.json"
+
+        def _delete() -> bool:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Deleted checkpoint {checkpoint_id} from {file_path}")
+                return True
+            return False
+
+        return await asyncio.to_thread(_delete)
 
 # Load environment variables
 load_dotenv()
@@ -130,7 +231,7 @@ active_connections: list[WebSocket] = []
 # Pre-initialized resources (created once on startup)
 mcp_tool: MCPStreamableHTTPTool | None = None
 chat_client: AzureOpenAIChatClient | None = None
-checkpoint_storage: FileCheckpointStorage | None = None
+checkpoint_storage: UTF8FileCheckpointStorage | None = None
 
 
 # ============================================================================
@@ -155,14 +256,18 @@ class ConnectionManager:
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
+        msg_type = message.get('type', message.get('event_type', 'unknown'))
+        logger.info(f"[BROADCAST] Sending message type={msg_type} to {len(self.active_connections)} connections")
+        
         if not self.active_connections:
-            logger.warning(f"No active WebSocket connections to broadcast to. Message type: {message.get('type', 'unknown')}")
+            logger.warning(f"No active WebSocket connections to broadcast to. Message type: {msg_type}")
             return
             
         disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
+                logger.info(f"[BROADCAST] Successfully sent {msg_type}")
             except Exception as e:
                 logger.error(f"Error sending to WebSocket: {e}")
                 disconnected.append(connection)
@@ -314,7 +419,9 @@ async def _resolve_checkpoint_for_request(alert_id: str, request_id: str) -> tup
 
         for checkpoint in checkpoints_sorted:
             try:
-                pending_requests = RequestInfoExecutor.pending_requests_from_checkpoint(checkpoint)
+                # Use the new get_checkpoint_summary API instead of RequestInfoExecutor
+                summary = get_checkpoint_summary(checkpoint)
+                pending_events = summary.pending_request_info_events
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.debug(
                     "Unable to inspect checkpoint %s for alert %s: %s",
@@ -324,9 +431,9 @@ async def _resolve_checkpoint_for_request(alert_id: str, request_id: str) -> tup
                 )
                 continue
 
-            for pending in pending_requests:
+            for pending in pending_events:
                 if pending.request_id == request_id:
-                    return checkpoint.checkpoint_id, pending.iteration
+                    return checkpoint.checkpoint_id, checkpoint.iteration_count
 
         return None, None
 
@@ -626,52 +733,78 @@ async def run_workflow(alert: SuspiciousActivityAlert):
         # Small delay to ensure WebSocket connection is fully established
         await asyncio.sleep(0.1)
 
+        # Track if we've seen a RequestInfoEvent (workflow is awaiting decision)
+        seen_request_info = False
+        request_info_event_data = None
+
         # Run workflow and stream events
         async for event in workflow.run_stream(alert):
+            logger.info(f"[DEBUG] Received event: {type(event).__name__}")
             await process_event(alert_id, event)
 
             # Check for human-in-the-loop request
             if isinstance(event, RequestInfoEvent):
+                logger.info(f"[DEBUG] RequestInfoEvent detected! request_id={event.request_id}, source={event.source_executor_id}")
                 request_payload = _serialize_analyst_request(event)
-                checkpoint_id, checkpoint_iteration = await _resolve_checkpoint_for_request(
-                    alert_id,
-                    event.request_id,
-                )
+                logger.info(f"[DEBUG] Serialized request payload keys: {list(request_payload.keys())}")
 
                 timestamp = datetime.now().isoformat()
 
+                # Store the pending decision immediately - checkpoint will be resolved later
                 pending_decisions[alert_id] = {
                     **request_payload,
                     "timestamp": timestamp,
                     "source_executor_id": event.source_executor_id,
-                    "checkpoint_id": checkpoint_id,
-                    "checkpoint_iteration": checkpoint_iteration,
+                    "checkpoint_id": None,  # Will be resolved after superstep completes
+                    "checkpoint_iteration": None,
                 }
                 pending_request_events[alert_id] = event
                 active_workflows[alert_id]["status"] = "awaiting_decision"
-                active_workflows[alert_id]["pending_checkpoint_id"] = checkpoint_id
-                if checkpoint_id:
-                    active_workflows[alert_id]["last_checkpoint_id"] = checkpoint_id
-                else:
-                    logger.warning(
-                        "No checkpoint recorded for alert %s request %s; resume will be unavailable until one is created.",
-                        alert_id,
-                        event.request_id,
-                    )
 
+                # Broadcast decision_required immediately - don't wait for checkpoint
                 await manager.broadcast(
                     {
                         "type": "decision_required",
                         "alert_id": alert_id,
                         "request_id": event.request_id,
                         "data": request_payload,
-                        "checkpoint_id": checkpoint_id,
-                        "checkpoint_iteration": checkpoint_iteration,
+                        "checkpoint_id": None,  # Will be resolved after superstep completes
+                        "checkpoint_iteration": None,
                         "timestamp": timestamp,
                     }
                 )
 
+                logger.info(f"[DEBUG] Broadcast decision_required for {alert_id}")
                 logger.info(f"Workflow {alert_id} awaiting analyst decision")
+                
+                # Mark that we've seen the request - continue processing to get checkpoint
+                seen_request_info = True
+                request_info_event_data = event
+                # DON'T return here - continue to let the superstep complete and checkpoint be created
+            
+            # After a superstep completes following a RequestInfoEvent, resolve the checkpoint
+            elif seen_request_info and isinstance(event, SuperStepCompletedEvent):
+                logger.info(f"[DEBUG] SuperStepCompleted after RequestInfoEvent - resolving checkpoint")
+                checkpoint_id, checkpoint_iteration = await _resolve_checkpoint_for_request(
+                    alert_id,
+                    request_info_event_data.request_id,
+                )
+                logger.info(f"[DEBUG] Resolved checkpoint: id={checkpoint_id}, iteration={checkpoint_iteration}")
+                
+                # Update stored values with resolved checkpoint
+                if checkpoint_id:
+                    pending_decisions[alert_id]["checkpoint_id"] = checkpoint_id
+                    pending_decisions[alert_id]["checkpoint_iteration"] = checkpoint_iteration
+                    active_workflows[alert_id]["pending_checkpoint_id"] = checkpoint_id
+                    active_workflows[alert_id]["last_checkpoint_id"] = checkpoint_id
+                else:
+                    logger.warning(
+                        "No checkpoint recorded for alert %s request %s; resume will be unavailable until one is created.",
+                        alert_id,
+                        request_info_event_data.request_id,
+                    )
+                
+                # Now we can exit - workflow is paused awaiting decision
                 return
 
         # If we exit the loop naturally, mark as completed
@@ -759,44 +892,49 @@ async def continue_workflow(alert_id: str, responses: dict[str, Any], checkpoint
         workflow_state.setdefault("workflow_id", workflow.id)
         workflow_state["status"] = "running"
 
-        # Debug: Check what's in the checkpoint
+        # Debug: Check what's in the checkpoint using get_checkpoint_summary
         checkpoint = await checkpoint_storage.load_checkpoint(effective_checkpoint_id)
         if checkpoint:
-            logger.info(f"Checkpoint has {len(checkpoint.executor_states)} executor states")
-            analyst_state = checkpoint.executor_states.get("analyst_review", {})
-            logger.info(f"analyst_review state keys: {list(analyst_state.keys()) if isinstance(analyst_state, dict) else 'not a dict'}")
-            if isinstance(analyst_state, dict):
-                shared_state_key = RequestInfoExecutor._PENDING_SHARED_STATE_KEY
-                pending_requests = checkpoint.shared_state.get(shared_state_key, {})
-                logger.info(f"Pending requests in shared state: {list(pending_requests.keys())}")
+            summary = get_checkpoint_summary(checkpoint)
+            logger.info(f"Checkpoint status: {summary.status}")
+            logger.info(f"Pending request events: {len(summary.pending_request_info_events)}")
+            for pending in summary.pending_request_info_events:
+                logger.info(f"  - Request ID: {pending.request_id}, Source: {pending.source_executor_id}")
         
-        logger.info(f"Starting run_stream_from_checkpoint with responses keys: {list(responses.keys())}")
+        logger.info(f"Starting workflow resume with responses keys: {list(responses.keys())}")
         logger.info(f"Checkpoint ID: {effective_checkpoint_id}")
 
-        # Immediately broadcast analyst_review completion since the framework may not emit it
-        # The RequestInfoExecutor was waiting, and when we provide the response, it completes
+        # Immediately broadcast review_gateway completion since the framework may not emit it
+        # The executor using ctx.request_info was waiting, and when we provide the response, it completes
         # but this completion event is not always emitted in the event stream during resume
         await manager.broadcast({
             "alert_id": alert_id,
             "type": "ExecutorCompletedEvent",
             "event_type": "executor_completed",
-            "executor_id": "analyst_review",
+            "executor_id": "review_gateway",
             "timestamp": datetime.now().isoformat(),
         })
-        logger.info("Broadcast analyst_review completion event")
+        logger.info("Broadcast review_gateway completion event")
 
         # Track request info executors that completed during resume
         completed_request_executors = set()
         
-        async for event in workflow.run_stream_from_checkpoint(
-            effective_checkpoint_id,
+        # First, restore from checkpoint
+        logger.info(f"Restoring workflow from checkpoint {effective_checkpoint_id}")
+        async for event in workflow.run_stream(
+            checkpoint_id=effective_checkpoint_id,
             checkpoint_storage=checkpoint_storage,
-            responses=responses,
         ):
+            logger.info(f"Restore event received: {type(event).__name__}")
+            await process_event(alert_id, event)
+        
+        # Now send the responses to continue the workflow
+        logger.info(f"Sending responses to continue workflow: {list(responses.keys())}")
+        async for event in workflow.send_responses_streaming(responses):
             logger.info(f"Event received: {type(event).__name__}")
             
-            # Track when analyst_review completes so we can re-broadcast at the end
-            if isinstance(event, ExecutorCompletedEvent) and event.executor_id == "analyst_review":
+            # Track when review_gateway completes so we can re-broadcast at the end
+            if isinstance(event, ExecutorCompletedEvent) and event.executor_id == "review_gateway":
                 completed_request_executors.add(event.executor_id)
             
             await process_event(alert_id, event)
@@ -979,11 +1117,11 @@ async def startup_event():
         chat_client = AzureOpenAIChatClient(credential=AzureCliCredential(), deployment_name=os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT"))
         logger.info("✓ Azure OpenAI client initialized")
 
-        # Initialize checkpoint storage
+        # Initialize checkpoint storage with UTF-8 encoding wrapper
         import pathlib
         checkpoint_dir = pathlib.Path("./checkpoints")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        checkpoint_storage = FileCheckpointStorage(str(checkpoint_dir))
+        checkpoint_storage = UTF8FileCheckpointStorage(str(checkpoint_dir))
         logger.info(f"✓ Checkpoint storage initialized at {checkpoint_dir.absolute()}")
 
         logger.info("Backend ready! 🚀")
