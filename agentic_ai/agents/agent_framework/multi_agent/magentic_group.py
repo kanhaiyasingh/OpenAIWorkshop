@@ -15,8 +15,11 @@ from agent_framework import (
     CheckpointStorage,
     AgentRunUpdateEvent,
     AgentRunEvent,
-    MAGENTIC_EVENT_TYPE_ORCHESTRATOR,
-    MAGENTIC_EVENT_TYPE_AGENT_DELTA,
+    MagenticOrchestratorEvent,
+    MagenticOrchestratorEventType,
+    RequestInfoEvent,
+    MagenticPlanReviewRequest,
+    MagenticPlanReviewResponse,
 )
 from agent_framework.azure import AzureOpenAIChatClient  # type: ignore[import]
 
@@ -438,7 +441,7 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
     ) -> Any:
         participants = await self._create_participants(participant_client, tools)
 
-        builder = MagenticBuilder().participants(**participants)
+        builder = MagenticBuilder().participants(list(participants.values()))
         
         # Note: Streaming is now handled in _run_workflow by processing events from run_stream()
         if self._ws_manager:
@@ -454,7 +457,7 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
         
         builder = (
             builder
-            .with_standard_manager(
+            .with_manager(
                 agent=manager_agent,
                 max_round_count=self._max_round_count,
                 max_stall_count=self._max_stall_count,
@@ -464,19 +467,13 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
             .with_checkpointing(checkpoint_storage)
         )
 
-        # Optional: enable plan review if available
+        # Optional: enable plan review
         if self._enable_plan_review:
-            enable_plan_review = getattr(builder, "enable_plan_review", None)
-            if callable(enable_plan_review):
-                try:
-                    builder = enable_plan_review()
-                except Exception as exc:
-                    logger.warning(
-                        "[AgentFramework-Magentic] Failed to enable plan review: %s", exc
-                    )
-            else:
-                logger.debug(
-                    "[AgentFramework-Magentic] Plan review requested but not available in this framework version."
+            try:
+                builder = builder.with_plan_review(True)
+            except Exception as exc:
+                logger.warning(
+                    "[AgentFramework-Magentic] Failed to enable plan review: %s", exc
                 )
 
         return builder.build()
@@ -637,17 +634,62 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
         final_answer: str | None = None
 
         try:
+            # Start the initial stream
             if checkpoint_id:
                 event_stream = workflow.run_stream_from_checkpoint(checkpoint_id, checkpoint_storage)
             else:
                 event_stream = workflow.run_stream(task)
-            
-            async for event in event_stream:
-                # Stream events to WebSocket if available
-                await self._process_workflow_event(event)
-                
-                if isinstance(event, WorkflowOutputEvent):
-                    final_answer = self._extract_text_from_event(event)
+
+            pending_responses: dict[str, Any] | None = None
+            output_received = False
+
+            while not output_received:
+                # If we have pending plan-review responses, resume via send_responses_streaming
+                if pending_responses is not None:
+                    event_stream = workflow.send_responses_streaming(pending_responses)
+                    pending_responses = None
+
+                pending_request: RequestInfoEvent | None = None
+
+                async for event in event_stream:
+                    # Stream events to WebSocket if available
+                    await self._process_workflow_event(event)
+
+                    if isinstance(event, WorkflowOutputEvent):
+                        final_answer = self._extract_text_from_event(event)
+                        output_received = True
+
+                    elif isinstance(event, RequestInfoEvent) and event.request_type is MagenticPlanReviewRequest:
+                        # Capture plan review request — stream will pause after this
+                        pending_request = event
+
+                # Handle plan review: auto-approve and loop back
+                if pending_request is not None and not output_received:
+                    request_data = cast(MagenticPlanReviewRequest, pending_request.data)
+                    logger.info(
+                        "[AgentFramework-Magentic] Plan review requested (stalled=%s) — auto-approving",
+                        request_data.is_stalled,
+                    )
+
+                    # Broadcast plan-review approval to WebSocket
+                    if self._ws_manager:
+                        await self._ws_manager.broadcast(
+                            self.session_id,
+                            {
+                                "type": "orchestrator",
+                                "kind": "plan_review_approved",
+                                "content": "Plan auto-approved. Continuing execution...",
+                            },
+                        )
+
+                    response = request_data.approve()
+                    pending_responses = {pending_request.request_id: response}
+                    pending_request = None
+                elif not output_received and pending_request is None:
+                    # Stream ended without output and no plan review request — unexpected
+                    logger.warning("[AgentFramework-Magentic] workflow stream ended without output or plan review")
+                    break
+
         except Exception as exc:
             logger.error("[AgentFramework-Magentic] workflow failure: %s", exc, exc_info=True)
             return None
@@ -663,51 +705,60 @@ DO NOT OUTPUT ANYTHING OTHER THAN JSON, AND DO NOT DEVIATE FROM THIS SCHEMA:
             return
 
         try:
-            # Handle AgentRunUpdateEvent (streaming tokens and orchestrator messages)
-            if isinstance(event, AgentRunUpdateEvent) and event.data:
-                props = getattr(event.data, "additional_properties", None) or {}
-                event_type = props.get("magentic_event_type")
-                
-                if event_type == MAGENTIC_EVENT_TYPE_ORCHESTRATOR:
-                    # Manager/orchestrator thinking or planning
-                    message_text = getattr(event.data, "text", "") or ""
-                    kind = props.get("orchestrator_message_kind", "")
+            # Handle MagenticOrchestratorEvent (plan, replan, progress ledger)
+            if isinstance(event, MagenticOrchestratorEvent):
+                message_text = getattr(event.data, "text", "") or str(event.data)
+                kind = event.event_type.value  # e.g. "plan_created", "replanned", "progress_ledger_updated"
+                await self._ws_manager.broadcast(
+                    self.session_id,
+                    {
+                        "type": "orchestrator",
+                        "kind": kind,
+                        "content": message_text,
+                    },
+                )
+
+            # Handle RequestInfoEvent for plan review
+            elif isinstance(event, RequestInfoEvent) and event.request_type is MagenticPlanReviewRequest:
+                request_data = cast(MagenticPlanReviewRequest, event.data)
+                plan_text = getattr(request_data.plan, "text", "") or str(request_data.plan)
+                await self._ws_manager.broadcast(
+                    self.session_id,
+                    {
+                        "type": "orchestrator",
+                        "kind": "plan_review_requested",
+                        "content": plan_text,
+                        "is_stalled": request_data.is_stalled,
+                    },
+                )
+
+            # Handle AgentRunUpdateEvent (streaming tokens from participant agents)
+            elif isinstance(event, AgentRunUpdateEvent) and event.data:
+                agent_id = event.executor_id
+
+                if self._stream_agent_id != agent_id or not self._stream_line_open:
+                    self._stream_agent_id = agent_id
+                    self._stream_line_open = True
                     await self._ws_manager.broadcast(
                         self.session_id,
                         {
-                            "type": "orchestrator",
-                            "kind": kind,
-                            "content": message_text,
+                            "type": "agent_start",
+                            "agent_id": agent_id,
+                            "show_message_in_internal_process": True,
                         },
                     )
-                
-                elif event_type == MAGENTIC_EVENT_TYPE_AGENT_DELTA:
-                    # Streaming token from participant agent
-                    agent_id = event.executor_id
-                    
-                    if self._stream_agent_id != agent_id or not self._stream_line_open:
-                        self._stream_agent_id = agent_id
-                        self._stream_line_open = True
-                        await self._ws_manager.broadcast(
-                            self.session_id,
-                            {
-                                "type": "agent_start",
-                                "agent_id": agent_id,
-                                "show_message_in_internal_process": True,
-                            },
-                        )
-                    
-                    # Stream text tokens
-                    text = getattr(event.data, "text", "") or ""
-                    if text:
-                        await self._ws_manager.broadcast(
-                            self.session_id,
-                            {
-                                "type": "agent_token",
-                                "agent_id": agent_id,
-                                "content": text,
-                            },
-                        )
+
+                # Stream text tokens
+                text = getattr(event.data, "text", "") or ""
+                if text:
+                    await self._ws_manager.broadcast(
+                        self.session_id,
+                        {
+                            "type": "agent_token",
+                            "agent_id": agent_id,
+                            "content": text,
+                        },
+                    )
             
             # Handle AgentRunEvent (complete agent response)
             elif isinstance(event, AgentRunEvent) and event.data:
