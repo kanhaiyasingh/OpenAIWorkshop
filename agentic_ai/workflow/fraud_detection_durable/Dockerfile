@@ -1,6 +1,7 @@
 # Fraud Detection Durable Workflow
 # Multi-stage build: React UI + Python Worker/Backend
 # DTS runs as sidecar container in Container Apps
+# Build context: agentic_ai/ (parent dir, for shared observability module)
 
 # ============================================================================
 # Stage 1: Build React Frontend
@@ -10,13 +11,13 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # Copy frontend package files
-COPY ui/package*.json ./
+COPY workflow/fraud_detection_durable/ui/package*.json ./
 
 # Install dependencies
 RUN npm ci
 
 # Copy frontend source
-COPY ui/ ./
+COPY workflow/fraud_detection_durable/ui/ ./
 
 # Build React app (Vite outputs to 'dist/')
 RUN npm run build
@@ -37,16 +38,18 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Copy dependency files first for caching
-COPY pyproject.toml ./
+COPY workflow/fraud_detection_durable/pyproject.toml ./
 
 # Install Python dependencies
 RUN uv pip install --system -e .
 
 # Copy application code
-COPY *.py ./
-COPY .env.sample ./
-COPY start.sh ./
+COPY workflow/fraud_detection_durable/*.py ./
+COPY workflow/fraud_detection_durable/start.sh ./
 RUN chmod +x /app/start.sh
+
+# Copy shared observability module
+COPY observability /app/observability
 
 # Copy built frontend from previous stage (Vite outputs to 'dist')
 COPY --from=frontend-builder /app/frontend/dist ./static

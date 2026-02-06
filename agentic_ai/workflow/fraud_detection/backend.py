@@ -6,9 +6,33 @@ Provides REST API endpoints and WebSocket for real-time workflow event streaming
 
 import asyncio
 import logging
+import os
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Load environment first so observability can read connection string
+load_dotenv()
+
+# ------------------------------------------------------------------
+# Observability (must be before any agent imports)
+# ------------------------------------------------------------------
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # agentic_ai/
+
+try:
+    from observability import setup_observability
+    _observability_enabled = setup_observability(
+        service_name="contoso-fraud-detection",
+        enable_live_metrics=True,
+        enable_sensitive_data=os.getenv("ENABLE_SENSITIVE_DATA", "false").lower() in ("1", "true", "yes"),
+    )
+except ImportError:
+    _observability_enabled = False
+
+# ------------------------------------------------------------------
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -34,10 +58,7 @@ from agent_framework import (
 )
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import AzureCliCredential
-from dotenv import load_dotenv
-import os
 import json
-from pathlib import Path
 from dataclasses import asdict
 
 
@@ -136,12 +157,11 @@ class UTF8FileCheckpointStorage:
 
         return await asyncio.to_thread(_delete)
 
-# Load environment variables
-load_dotenv()
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
+if _observability_enabled:
+    logger.info("✅ Application Insights observability enabled for fraud detection workflow")
 
 # Keep agent_framework at INFO level
 logging.getLogger("agent_framework").setLevel(logging.INFO)

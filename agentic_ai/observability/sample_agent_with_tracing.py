@@ -66,9 +66,8 @@ if not success:
 async def run_agent_with_tracing():
     """Run a sample agent with full observability."""
     
-    from agent_framework import ChatAgent
-    from agent_framework.mcp import McpServerManager
-    from agent_framework.openai import AzureOpenAIChatClient
+    from agent_framework import ChatAgent, MCPStreamableHTTPTool
+    from agent_framework.azure import AzureOpenAIChatClient
     from azure.identity import DefaultAzureCredential
     
     # Get tracer for custom spans
@@ -100,53 +99,53 @@ async def run_agent_with_tracing():
         session_span.set_attribute("customer.scenario", "billing-inquiry")
         session_span.set_attribute("session.type", "demo")
         
-        async with McpServerManager(mcp_url) as mcp_manager:
-            mcp_tools = await mcp_manager.list_tools()
-            print(f"📦 Loaded {len(mcp_tools)} MCP tools")
-            
-            # Create chat client
-            chat_client = AzureOpenAIChatClient(
-                azure_endpoint=azure_endpoint,
-                azure_deployment=deployment_name,
-                credential=DefaultAzureCredential(),
-            )
-            
-            # Create agent
-            agent = ChatAgent(
-                chat_client=chat_client,
-                tools=mcp_tools,
-                name="CustomerServiceAgent",
-                instructions="""You are a helpful customer service agent for Contoso Wireless.
-                Use the available tools to look up customer information, billing details, and data usage.
-                Be concise and helpful in your responses.""",
-                id="customer-service-agent",
-            )
-            
-            # Sample queries to demonstrate observability
-            queries = [
-                "What's the billing summary for customer 1?",
-                "Show me the data usage for subscription 1 from 2025-01-01 to 2025-01-15",
-            ]
-            
-            thread = agent.get_new_thread()
-            
-            for query in queries:
-                print(f"\n👤 User: {query}")
-                print(f"🤖 Agent: ", end="")
-                
-                # Each query gets its own span
-                with tracer.start_as_current_span(
-                    "agent-query",
-                    kind=SpanKind.CLIENT
-                ) as query_span:
-                    query_span.set_attribute("user.query", query)
-                    
-                    async for update in agent.run_stream(query, thread=thread):
-                        if update.text:
-                            print(update.text, end="")
-                
-                print()
+        # Create MCP tool (connects to MCP server on demand)
+        mcp_tool = MCPStreamableHTTPTool(
+            name="contoso_mcp",
+            url=mcp_url,
+            timeout=30,
+        )
         
+        # Create chat client
+        chat_client = AzureOpenAIChatClient(
+            endpoint=azure_endpoint,
+            deployment_name=deployment_name,
+            credential=DefaultAzureCredential(),
+        )
+        
+        # Create agent
+        agent = ChatAgent(
+            chat_client=chat_client,
+            tools=[mcp_tool],
+            name="CustomerServiceAgent",
+            instructions="""You are a helpful customer service agent for Contoso Wireless.
+            Use the available tools to look up customer information, billing details, and data usage.
+            Be concise and helpful in your responses.""",
+            id="customer-service-agent",
+        )
+        
+        # Sample queries to demonstrate observability
+        queries = [
+            "What's the billing summary for customer 1?",
+            "Show me the data usage for subscription 1 from 2025-01-01 to 2025-01-15",
+        ]
+        
+        thread = agent.get_new_thread()
+        
+        for query in queries:
+            print(f"\n👤 User: {query}")
+            print(f"🤖 Agent: ", end="")
+            
+            # Each query gets its own span
+            with tracer.start_as_current_span(
+                "agent-query",
+                kind=SpanKind.CLIENT
+            ) as query_span:
+                query_span.set_attribute("user.query", query)
+                
+                async for update in agent.run_stream(query, thread=thread):
+                    if update.text:
+                        print(update.text, end="")
         print("\n" + "=" * 60)
         print("✅ Session complete!")
         print(f"📊 View traces at: https://aka.ms/amg/dash/af-agent")

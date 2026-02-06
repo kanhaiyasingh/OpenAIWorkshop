@@ -125,9 +125,9 @@ if (-not $SkipBuild) {
 if (-not $SkipBuild) {
     Write-Host "`n[5/6] Building and pushing Fraud Workflow image..." -ForegroundColor Green
     
-    Push-Location agentic_ai/workflow/fraud_detection_durable
+    Push-Location agentic_ai
     try {
-        docker build -t "$AcrLoginServer/fraud-workflow:latest" -f Dockerfile .
+        docker build -t "$AcrLoginServer/fraud-workflow:latest" -f workflow/fraud_detection_durable/Dockerfile .
         docker push "$AcrLoginServer/fraud-workflow:latest"
         
         if ($LASTEXITCODE -ne 0) {

@@ -20,12 +20,34 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from collections.abc import Generator
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
-from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 from dotenv import load_dotenv
+
+# Load environment first so observability can read connection string
+load_dotenv()
+
+# ------------------------------------------------------------------
+# Observability (must be before any agent imports)
+# ------------------------------------------------------------------
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # agentic_ai/
+
+try:
+    from observability import setup_observability
+    _observability_enabled = setup_observability(
+        service_name="contoso-fraud-worker",
+        enable_live_metrics=True,
+        enable_sensitive_data=os.getenv("ENABLE_SENSITIVE_DATA", "false").lower() in ("1", "true", "yes"),
+    )
+except ImportError:
+    _observability_enabled = False
+
+# ------------------------------------------------------------------
+from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 from durabletask.azuremanaged.worker import DurableTaskSchedulerWorker
 from durabletask.task import ActivityContext, OrchestrationContext, Task, when_any, when_all
 from pydantic import BaseModel, ValidationError
@@ -39,12 +61,11 @@ from fraud_analysis_workflow import (
     create_fraud_analysis_workflow,
 )
 
-# Load environment
-load_dotenv()
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+if _observability_enabled:
+    logger.info("✅ Application Insights observability enabled for fraud workflow worker")
 
 # Constants
 ANALYST_APPROVAL_EVENT = "AnalystDecision"
