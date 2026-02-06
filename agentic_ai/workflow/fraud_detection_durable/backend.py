@@ -13,14 +13,36 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from typing import Any
 
 from pathlib import Path
 
-from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
+
+# Load environment first so observability can read connection string
+load_dotenv()
+
+# ------------------------------------------------------------------
+# Observability (must be before any agent imports)
+# ------------------------------------------------------------------
+# Add parent directories to path for the shared observability module
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # agentic_ai/
+
+try:
+    from observability import setup_observability
+    _observability_enabled = setup_observability(
+        service_name="contoso-fraud-workflow",
+        enable_live_metrics=True,
+        enable_sensitive_data=os.getenv("ENABLE_SENSITIVE_DATA", "false").lower() in ("1", "true", "yes"),
+    )
+except ImportError:
+    _observability_enabled = False
+
+# ------------------------------------------------------------------
+from azure.identity import DefaultAzureCredential
 from durabletask.azuremanaged.client import DurableTaskSchedulerClient
 from durabletask.client import OrchestrationState
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -29,12 +51,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-# Load environment
-load_dotenv()
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+if _observability_enabled:
+    logger.info("✅ Application Insights observability enabled for fraud workflow backend")
 
 # FastAPI app
 app = FastAPI(
