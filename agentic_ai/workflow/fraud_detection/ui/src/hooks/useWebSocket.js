@@ -3,6 +3,7 @@ import { WS_CONFIG } from '../constants/config';
 
 /**
  * Custom hook for managing WebSocket connections with automatic reconnection
+ * Uses a message queue to ensure no messages are lost when they arrive quickly
  * @param {string} url - WebSocket URL to connect to
  * @returns {Object} Object containing lastMessage, readyState, and sendMessage function
  */
@@ -12,6 +13,29 @@ export function useWebSocket(url) {
   const ws = useRef(null);
   const reconnectTimeout = useRef(null);
   const reconnectAttempts = useRef(0);
+  
+  // Message queue to prevent lost messages during rapid updates
+  const messageQueue = useRef([]);
+  const processingQueue = useRef(false);
+
+  // Process messages from queue one at a time
+  const processQueue = useCallback(() => {
+    if (processingQueue.current || messageQueue.current.length === 0) {
+      return;
+    }
+    
+    processingQueue.current = true;
+    const message = messageQueue.current.shift();
+    
+    // Use setTimeout to ensure React processes each state update
+    setLastMessage(message);
+    
+    // Schedule next message processing
+    setTimeout(() => {
+      processingQueue.current = false;
+      processQueue();
+    }, 0);
+  }, []);
 
   const connect = useCallback(() => {
     try {
@@ -26,7 +50,9 @@ export function useWebSocket(url) {
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          setLastMessage(data);
+          // Add to queue instead of directly setting state
+          messageQueue.current.push(data);
+          processQueue();
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
         }
@@ -56,7 +82,7 @@ export function useWebSocket(url) {
     } catch (error) {
       console.error('Error creating WebSocket:', error);
     }
-  }, [url]);
+  }, [url, processQueue]);
 
   useEffect(() => {
     connect();

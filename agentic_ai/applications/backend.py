@@ -15,6 +15,9 @@ import logging
 from pathlib import Path  
 from typing import Dict, List, Any, Optional, Set, DefaultDict
 from collections import defaultdict
+
+# Add parent directory to path for observability module
+sys.path.insert(0, str(Path(__file__).parent.parent))
   
 import httpx
 import jwt
@@ -29,9 +32,28 @@ from pydantic import BaseModel
 from dotenv import load_dotenv  
 
 # ------------------------------------------------------------------  
-# Environment  
+# Environment (load first so observability can read connection string)
 # ------------------------------------------------------------------  
 load_dotenv()  # read .env if present  
+
+# ------------------------------------------------------------------  
+# Observability (must be before any agent imports)
+# ------------------------------------------------------------------  
+from observability import setup_observability
+
+# Initialize Application Insights tracing if configured
+# All agents (single, reflection, handoff, etc.) are automatically traced
+_observability_enabled = setup_observability(
+    service_name="contoso-agent-backend",
+    enable_live_metrics=True,
+    enable_sensitive_data=os.getenv("ENABLE_SENSITIVE_DATA", "false").lower() in ("1", "true", "yes"),
+)
+if _observability_enabled:
+    logging.getLogger(__name__).info("✅ Application Insights observability enabled")
+
+# ------------------------------------------------------------------  
+# Auth Configuration
+# ------------------------------------------------------------------  
 
 # Feature flag: disable auth for local dev / demos
 DISABLE_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
@@ -286,7 +308,8 @@ class ChatRequest(BaseModel):
   
   
 class ChatResponse(BaseModel):  
-    response: str  
+    response: str
+    tools_used: List[Dict[str, Any]] = []  # List of {name: str, args: dict}  
   
   
 class ConversationHistoryResponse(BaseModel):  
@@ -325,8 +348,16 @@ async def chat(req: ChatRequest, token: str = Depends(verify_token)):
         agent = Agent(STATE_STORE, req.session_id, access_token=token)
     except TypeError:
         agent = Agent(STATE_STORE, req.session_id)
-    answer = await agent.chat_async(req.prompt)  
-    return ChatResponse(response=answer)  
+    answer = await agent.chat_async(req.prompt)
+    
+    # Get tool calls if the agent tracks them
+    tools_used = []
+    if hasattr(agent, 'get_tool_calls'):
+        tools_used = agent.get_tool_calls()
+    elif hasattr(agent, '_tool_calls'):
+        tools_used = agent._tool_calls
+    
+    return ChatResponse(response=answer, tools_used=tools_used)  
   
 @app.post("/reset_session")  
 async def reset_session(req: SessionResetRequest, token: str = Depends(verify_token)):  
@@ -417,6 +448,45 @@ async def set_active_agent(req: SetAgentRequest, token: str = Depends(verify_tok
             "status": "error",
             "message": "Failed to load agent."
         }
+
+# ──────────────────────────────────────────────────────────────
+# Diagnostic: check observability status
+# ──────────────────────────────────────────────────────────────
+@app.get("/api/diagnostics/observability")
+async def diagnostics_observability():
+    """Check if observability is configured and working."""
+    import importlib
+    diag: Dict[str, Any] = {
+        "observability_enabled": _observability_enabled,
+        "connection_string_set": bool(os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")),
+    }
+    # Check key imports
+    for mod_name in ["azure.monitor.opentelemetry", "agent_framework.observability", "opentelemetry"]:
+        try:
+            importlib.import_module(mod_name)
+            diag[f"import_{mod_name}"] = "ok"
+        except Exception as e:
+            diag[f"import_{mod_name}"] = str(e)
+    # Check OTel tracer provider
+    try:
+        from opentelemetry import trace
+        tp = trace.get_tracer_provider()
+        diag["tracer_provider"] = type(tp).__name__
+        if hasattr(tp, '_active_span_processor'):
+            proc = tp._active_span_processor
+            diag["span_processors"] = type(proc).__name__
+            if hasattr(proc, '_span_processors'):
+                diag["span_processor_list"] = [type(sp).__name__ for sp in proc._span_processors]
+    except Exception as e:
+        diag["tracer_provider_error"] = str(e)
+    # Check OTel meter provider
+    try:
+        from opentelemetry import metrics
+        mp = metrics.get_meter_provider()
+        diag["meter_provider"] = type(mp).__name__
+    except Exception as e:
+        diag["meter_provider_error"] = str(e)
+    return diag
 
 # ──────────────────────────────────────────────────────────────
 # Root route to serve React app

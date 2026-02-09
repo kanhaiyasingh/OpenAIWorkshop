@@ -45,13 +45,15 @@ function AnalystDecisionPanel({ decision, onSubmit }) {
     <Paper
       elevation={3}
       sx={{
-        p: 1.5,
+        p: 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: 1,
-        border: 3,
+        gap: 0.5,
+        border: 2,
         borderColor: 'warning.main',
         animation: 'pulse 2s ease-in-out infinite',
+        maxHeight: '50vh',
+        overflow: 'auto',
         '@keyframes pulse': {
           '0%, 100%': { borderColor: '#ff9800' },
           '50%': { borderColor: '#ffc107' },
@@ -99,9 +101,11 @@ function AnalystDecisionPanel({ decision, onSubmit }) {
           <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
             AI Analysis
           </Typography>
-          <Paper variant="outlined" sx={{ p: 0.75, bgcolor: 'grey.50', maxHeight: 80, overflow: 'auto' }}>
+          <Paper variant="outlined" sx={{ p: 0.75, bgcolor: 'grey.50', maxHeight: 120, overflow: 'auto' }}>
             <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', fontSize: '0.7rem' }}>
-              {decision.data.reasoning}
+              {decision.data.reasoning.length > 500 
+                ? decision.data.reasoning.substring(0, 500) + '...' 
+                : decision.data.reasoning}
             </Typography>
           </Paper>
         </Box>
