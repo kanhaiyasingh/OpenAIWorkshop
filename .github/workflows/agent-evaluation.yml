@@ -120,6 +120,8 @@ jobs:
           AZURE_AI_PROJECT_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
           AZURE_OPENAI_ENDPOINT: ${{ vars.AZURE_OPENAI_EVAL_ENDPOINT }}
           AZURE_OPENAI_EVAL_DEPLOYMENT: ${{ vars.AZURE_OPENAI_EVAL_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: '2025-04-01-preview'
+          OPENAI_API_VERSION: '2025-04-01-preview'
 
       - name: Generate evaluation summary
         if: always()

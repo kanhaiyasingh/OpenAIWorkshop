@@ -658,10 +658,13 @@ class AzureAIEvaluatorSuite:
             eval_deployment = os.getenv("AZURE_OPENAI_EVAL_DEPLOYMENT") or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o-mini")
             model_config = {
                 "azure_endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
-                "api_key": os.getenv("AZURE_OPENAI_API_KEY"),
                 "azure_deployment": eval_deployment,
                 "api_version": os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
             }
+            # Only include api_key if explicitly set; otherwise SDK uses DefaultAzureCredential
+            api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            if api_key:
+                model_config["api_key"] = api_key
         
         if not model_config.get("azure_endpoint"):
             print("[WARN] AZURE_OPENAI_ENDPOINT not set - Azure evaluators disabled")
