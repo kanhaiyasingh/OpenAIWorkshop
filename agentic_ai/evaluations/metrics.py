@@ -10,6 +10,7 @@ Includes Azure AI Foundry evaluators for LLM-as-judge evaluation.
 """
 
 import os
+import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -671,6 +672,15 @@ class AzureAIEvaluatorSuite:
             self.available = False
             return
         
+        # Detect reasoning models (GPT-5+, o-series) which require
+        # max_completion_tokens instead of max_tokens.
+        # The Azure AI Evaluation SDK internally uses max_tokens in its prompty
+        # templates, so we monkey-patch the OpenAI client to convert automatically.
+        deployment = model_config.get("azure_deployment", "")
+        self._is_reasoning_model = self._check_reasoning_model(deployment)
+        if self._is_reasoning_model:
+            self._patch_openai_for_reasoning_model()
+        
         try:
             # Initialize all evaluators
             self._intent_evaluator = IntentResolutionEvaluator(model_config=model_config)
@@ -684,6 +694,58 @@ class AzureAIEvaluatorSuite:
         except Exception as e:
             print(f"[WARN] Failed to initialize Azure evaluators: {e}")
             self.available = False
+
+    @staticmethod
+    def _check_reasoning_model(model_name: str) -> bool:
+        """Check if a model is a reasoning model (GPT-5+, o-series).
+        
+        Reasoning models require max_completion_tokens instead of max_tokens.
+        """
+        model_lower = model_name.lower()
+        # o-series reasoning models (o1, o3, o4, etc.)
+        if re.match(r'^o\d', model_lower):
+            return True
+        # GPT-5 or higher
+        gpt_match = re.search(r'gpt-?(\d+)', model_lower)
+        if gpt_match and int(gpt_match.group(1)) >= 5:
+            return True
+        return False
+
+    @staticmethod
+    def _patch_openai_for_reasoning_model():
+        """Monkey-patch OpenAI client to use max_completion_tokens instead of max_tokens.
+        
+        The Azure AI Evaluation SDK's built-in evaluators (CoherenceEvaluator, etc.)
+        internally call chat.completions.create(max_tokens=...) via their prompty
+        templates. Reasoning models (GPT-5+, o-series) reject max_tokens and require
+        max_completion_tokens. This patch transparently converts the parameter.
+        """
+        try:
+            import openai.resources.chat.completions as _chat_mod
+
+            # Patch async path (used by SDK evaluators)
+            _orig_async = _chat_mod.AsyncCompletions.create
+
+            async def _patched_async(self, *args, **kwargs):
+                if 'max_tokens' in kwargs:
+                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+                return await _orig_async(self, *args, **kwargs)
+
+            _chat_mod.AsyncCompletions.create = _patched_async
+
+            # Patch sync path (fallback)
+            _orig_sync = _chat_mod.Completions.create
+
+            def _patched_sync(self, *args, **kwargs):
+                if 'max_tokens' in kwargs:
+                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+                return _orig_sync(self, *args, **kwargs)
+
+            _chat_mod.Completions.create = _patched_sync
+
+            print(f"[OK] Patched OpenAI client: max_tokens → max_completion_tokens (reasoning model detected)")
+        except Exception as e:
+            print(f"[WARN] Failed to patch OpenAI client for reasoning model: {e}")
 
     def evaluate_intent(self, query: str, response: str) -> EvaluationResult:
         """Evaluate if agent correctly identified user intent."""
