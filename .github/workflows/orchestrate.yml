@@ -250,7 +250,7 @@ jobs:
       always()
       && needs.pipeline-config.outputs.full_deploy == 'true'
       && needs.integration-tests.result == 'success'
-      && (needs.agent-evaluation.result == 'success' || needs.agent-evaluation.result == 'skipped')
+      && (needs.agent-evaluation.result == 'success' || needs.agent-evaluation.result == 'skipped' || needs.agent-evaluation.result == 'failure')
       && (github.ref_name == 'tjs-infra-as-code' || github.ref_name == 'james-dev' || (inputs.target_env && inputs.target_env == 'dev'))
     uses: ./.github/workflows/destroy.yml
     with:

@@ -633,7 +633,7 @@ async def main():
     try:
         import httpx
         async with httpx.AsyncClient() as client:
-            health_response = await client.get(f"{backend_url}/health", timeout=5.0)
+            health_response = await client.get(f"{backend_url}/auth/config", timeout=5.0)
             print(f"✓ Backend is responding")
     except Exception as e:
         print(f"❌ Cannot connect to backend: {e}")

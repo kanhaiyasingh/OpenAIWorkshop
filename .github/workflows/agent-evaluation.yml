@@ -89,7 +89,7 @@ jobs:
         run: |
           echo "Waiting for backend at ${{ inputs.backend_endpoint }}..."
           for i in $(seq 1 12); do
-            if curl -sf "${{ inputs.backend_endpoint }}/health" > /dev/null 2>&1; then
+            if curl -sf "${{ inputs.backend_endpoint }}/auth/config" > /dev/null 2>&1; then
               echo "✅ Backend is ready"
               exit 0
             fi
