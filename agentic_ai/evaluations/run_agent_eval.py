@@ -598,6 +598,7 @@ async def main():
     parser.add_argument("--limit", type=int, default=0, help="Limit number of test cases to run (0 = all)")
     parser.add_argument("--multi-turn-only", action="store_true", help="Only run multi-turn test cases")
     parser.add_argument("--single-turn-only", action="store_true", help="Only run single-turn test cases")
+    parser.add_argument("--ci", action="store_true", help="CI mode: skip interactive prompts, auto-continue on MCP unavailability")
     args = parser.parse_args()
     
     # Determine agent name based on --agent flag
@@ -650,9 +651,12 @@ async def main():
     except:
         print(f"⚠ WARNING: Could not connect to MCP server")
         print(f"   Make sure it's running: cd mcp && uv run python mcp_service.py")
-        response = input("\nContinue anyway? (y/n): ")
-        if response.lower() != 'y':
-            return
+        if args.ci:
+            print(f"   CI mode: continuing without MCP server")
+        else:
+            response = input("\nContinue anyway? (y/n): ")
+            if response.lower() != 'y':
+                return
     
     # 4. Load test cases
     dataset_path = Path(__file__).parent / "eval_dataset.json"

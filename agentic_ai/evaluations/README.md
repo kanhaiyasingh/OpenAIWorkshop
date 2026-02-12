@@ -22,9 +22,13 @@ A comprehensive evaluation system for testing AI agents in customer support scen
    - [Local Evaluation](#local-evaluation)
    - [Remote Evaluation (Azure AI Foundry)](#remote-evaluation-azure-ai-foundry)
    - [Comparing Agents](#comparing-agents)
-5. [Interpreting Results](#interpreting-results)
-6. [Extending the Framework](#extending-the-framework)
-7. [Troubleshooting](#troubleshooting)
+5. [CI/CD Integration](#cicd-integration)
+   - [Architecture Decision](#architecture-decision)
+   - [What Runs in CI](#what-runs-in-ci)
+   - [Where Results Appear](#where-results-appear)
+6. [Interpreting Results](#interpreting-results)
+7. [Extending the Framework](#extending-the-framework)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -331,6 +335,7 @@ uv run python ../evaluations/run_agent_eval.py [OPTIONS]
 | `--single-turn-only` | Run only single-turn test cases |
 | `--multi-turn-only` | Run only multi-turn test cases |
 | `--limit N` | Limit to N test cases (useful for testing) |
+| `--ci` | CI mode: skip interactive prompts, auto-continue on MCP unavailability |
 
 ### Local Evaluation
 
@@ -410,6 +415,76 @@ uv run python ../evaluations/run_agent_eval.py --agent agent_reflection --remote
 ```
 
 View comparison in Azure AI Foundry portal → Evaluations → Compare runs.
+
+---
+
+## CI/CD Integration
+
+Agent evaluation runs automatically in the CI/CD pipeline after integration tests pass. This provides continuous quality monitoring for every deployment.
+
+### Architecture Decision
+
+The evaluation infrastructure uses an **independent Azure AI Foundry project** that is **not** managed by the pipeline's Terraform. This is intentional:
+
+| Concern | Pipeline-managed Foundry | Independent Foundry ✅ |
+|---------|--------------------------|------------------------|
+| `destroy-infrastructure` on dev | **Wipes all eval history** | Eval history preserved |
+| Cross-branch comparison | Results lost per branch | All branches share one project |
+| Setup complexity | Terraform modules needed | One-time manual setup |
+| Lifecycle | Tied to deploy/destroy cycle | Persistent, always available |
+
+The Foundry project (`evaluate`) lives in resource group `ml` and persists regardless of pipeline deploy/destroy cycles. This lets you compare agent quality trends across branches, deployments, and time.
+
+### What Runs in CI
+
+The `agent-evaluation` job runs as part of the **full deploy** pipeline (pushes and manual triggers, not PRs):
+
+```
+pipeline-config → preflight → deploy → build → update → integration-tests → agent-evaluation → destroy
+```
+
+The CI evaluation uses a focused subset for speed:
+
+```bash
+python agentic_ai/evaluations/run_agent_eval.py \
+  --backend-url $BACKEND_ENDPOINT \
+  --agent contoso-agent \
+  --local --remote \
+  --single-turn-only \
+  --limit 5 \
+  --ci
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--single-turn-only` | Skip multi-turn tests (faster, deterministic) |
+| `--limit 5` | Run 5 test cases (configurable via workflow input) |
+| `--ci` | Non-interactive mode: skip `input()` prompts, auto-continue on MCP unavailability |
+| `--local --remote` | Run local metrics AND push results to AI Foundry |
+
+The job uses `continue-on-error: true` so evaluation failures **do not** block the pipeline. This is a quality gate for visibility, not a hard gate.
+
+### Where Results Appear
+
+**GitHub Actions:**
+- **Step Summary** — Scores table rendered directly in the workflow run summary
+- **Artifacts** — Full `eval_results/` directory downloadable from the run
+
+**Azure AI Foundry Portal:**
+- Navigate to [ai.azure.com](https://ai.azure.com) → Project `evaluate` → **Evaluations**
+- Each CI run creates an evaluation named: `contoso-agent - Single Turn | YYYY-MM-DD HH:MM`
+- Use the **Compare** feature to track quality across deployments
+
+### Prerequisites
+
+CI/CD evaluation requires one-time setup:
+
+1. **RBAC roles** on the independent Foundry resources — see [GITHUB_ACTIONS_SETUP.md](../../infra/GITHUB_ACTIONS_SETUP.md#step-3b-assign-ai-foundry-evaluation-roles)
+2. **GitHub Actions variables:**
+   - `AZURE_AI_PROJECT_ENDPOINT` — AI Foundry project endpoint
+   - `AZURE_OPENAI_EVAL_ENDPOINT` — AI Services endpoint for judge models
+   - `AZURE_OPENAI_EVAL_DEPLOYMENT` — Model deployment name (e.g., `gpt-4o`)
+3. **No API keys needed** — authentication uses OIDC → `DefaultAzureCredential`
 
 ---
 
