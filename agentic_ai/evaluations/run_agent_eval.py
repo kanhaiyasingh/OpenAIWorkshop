@@ -276,7 +276,18 @@ async def run_foundry_evaluation(traces: List[AgentTrace], data_file: Path, agen
         
         with project_client:
             # Get OpenAI client from the project
-            openai_client = project_client.get_openai_client()
+            # Explicitly set api-version to ensure azure_ai_evaluator support
+            # (the SDK default should be 2025-11-15-preview but we force it to be safe)
+            openai_client = project_client.get_openai_client(
+                default_query={"api-version": "2025-11-15-preview"}
+            )
+            
+            # Diagnostic logging for CI debugging
+            import azure.ai.projects
+            print(f"📋 SDK versions: azure-ai-projects={azure.ai.projects.__version__}, openai={__import__('openai').__version__}")
+            print(f"📋 OpenAI base_url: {openai_client.base_url}")
+            if hasattr(openai_client, '_custom_query'):
+                print(f"📋 API version: {openai_client._custom_query}")
             
             # Check if the project has evals capability
             if not hasattr(openai_client, 'evals'):

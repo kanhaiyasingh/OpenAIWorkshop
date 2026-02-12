@@ -85,6 +85,13 @@ jobs:
             python-dotenv>=1.0.0 \
             openai>=2.5.0
 
+      - name: Verify SDK versions
+        run: |
+          echo "Installed SDK versions:"
+          pip show azure-ai-projects openai azure-ai-evaluation 2>/dev/null | grep -E 'Name:|Version:'
+          echo "---"
+          python -c "from azure.ai.projects import AIProjectClient; print('AIProjectClient imported OK')"
+
       - name: Wait for backend to be ready
         run: |
           echo "Waiting for backend at ${{ inputs.backend_endpoint }}..."
