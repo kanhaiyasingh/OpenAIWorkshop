@@ -35,7 +35,7 @@ jobs:
   update-containers:
     name: Update Container Apps
     runs-on: ubuntu-latest
-    # environment: ${{ inputs.environment }}  # Commented out to use repo-level variables
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
@@ -64,7 +64,8 @@ jobs:
           echo "backend_app=ca-be-${ITERATION}" >> $GITHUB_OUTPUT
           
           # ACR name follows Terraform pattern: {project}{env}acr{iteration}
-          ACR_NAME="${PROJECT}${ENV}acr${ITERATION}"
+          # ACR names must be alphanumeric — strip hyphens to match Terraform's replace("-", "")
+          ACR_NAME=$(echo "${PROJECT}${ENV}acr${ITERATION}" | tr -d '-')
           echo "acr_name=${ACR_NAME}" >> $GITHUB_OUTPUT
           echo "acr_server=${ACR_NAME}.azurecr.io" >> $GITHUB_OUTPUT
           echo "Using ACR: ${ACR_NAME}"
