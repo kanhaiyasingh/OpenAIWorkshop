@@ -1,4 +1,4 @@
-name: Orchestrate Deployment
+name: CI/CD Pipeline
 
 # ─────────────────────────────────────────────────────────────────────
 # Pipeline modes:
@@ -24,7 +24,6 @@ on:
   pull_request:
     branches:
       - main
-      - int-agentic
 
   push:
     branches:
@@ -58,7 +57,6 @@ jobs:
             # PRs: resolve from the target (base) branch
             case "${{ github.base_ref }}" in
               main)         ENV="production" ;;
-              int-agentic)  ENV="integration" ;;
               *)            ENV="integration" ;;
             esac
           elif [ "$EVENT" = "push" ]; then
