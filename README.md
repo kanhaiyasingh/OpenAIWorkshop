@@ -38,7 +38,8 @@ Welcome to the official repository for the Microsoft AI Agentic Workshop! This r
 - **[MCP Server Integration](mcp/)** - Model Context Protocol for enhanced agent tool capabilities with advanced features: authentication, RBAC, and APIM integration
 - **[Agent Evaluations](agentic_ai/evaluations/)** - Evaluate agent performance with custom metrics and test datasets
 - **Agent State & History Persistence** - In-memory or CosmosDB backend for conversation history and agent state
-- **[Enterprise-Ready Reference Architecture](infra/README.md)** - Production-grade deployment with VNet integration, private endpoints, managed identity, Terraform/Bicep IaC, and GitHub Actions CI/CD  
+- **[Enterprise-Ready Reference Architecture](infra/README.md)** - Production-grade deployment with VNet integration, private endpoints, managed identity, and Terraform/Bicep IaC
+- **[CI/CD Pipeline](.github/workflows/readme.md)** - Automated dev-to-production promotion with per-developer environments, OIDC auth, agent evaluation gates, and doc-change filtering  
   
 ---  
   
